@@ -11,8 +11,8 @@ In the Supabase project settings, copy the project URL and a **secret key** for 
 Create a **Web Service** from this repository with:
 
 - Root directory: `backend`
-- Build command: `npm install --omit=dev`
-- Start command: `npm start`
+- Build command: `pnpm install --no-frozen-lockfile && pnpm -w run build`
+- Start command: `pnpm start`
 
 Set these Render environment variables:
 
@@ -25,7 +25,7 @@ Render supplies `PORT` automatically. The backend binds to `0.0.0.0` and exposes
 
 ## 3. Configure the frontend
 
-Set `VITE_API_URL` to the Render backend URL, such as `https://fourfold-api.onrender.com`, then rebuild and redeploy the Vite frontend. For local development, create `backend/.env` from `backend/.env.example`, install backend packages with `npm --prefix backend install`, run it with `npm --prefix backend run dev`, and run the frontend with `pnpm dev`; Vite proxies `/api` and `/socket.io` to port 3001.
+Set `VITE_API_URL` to the Render backend URL, such as `https://fourfold-api.onrender.com`, then rebuild and redeploy the Vite frontend. For local development, copy `backend/.env.example` to `backend/.env`, run `pnpm install` from the repository root, then run `pnpm --dir backend dev` and `pnpm dev` in separate terminals. Vite proxies `/api` and `/socket.io` to port 3001.
 
 ## Rooms and reconnecting
 
