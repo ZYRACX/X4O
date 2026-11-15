@@ -12,14 +12,20 @@ const SUPABASE_SECRET = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_
 if (!SUPABASE_URL || !SUPABASE_SECRET) throw new Error('Set SUPABASE_URL and SUPABASE_SECRET_KEY before starting the backend.');
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET, { auth: { persistSession: false, autoRefreshToken: false } });
-const allowedOrigins = (process.env.WEB_ORIGIN || 'http://localhost:5173').split(',').map(value => value.trim()).filter(Boolean);
-const originAllowed = origin => !origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin);
+const normalizeOrigin = origin => origin.trim().replace(/\/+$/, '');
+const allowedOrigins = (process.env.WEB_ORIGIN || 'http://localhost:5173').split(',').map(value => normalizeOrigin(value)).filter(Boolean);
+const originAllowed = origin => !origin || allowedOrigins.includes('*') || allowedOrigins.includes(normalizeOrigin(origin));
+const corsOrigin = (origin, callback) => {
+  if (!origin || allowedOrigins.includes('*')) return callback(null, true);
+  if (!originAllowed(origin)) return callback(new Error('Origin not allowed'));
+  return callback(null, normalizeOrigin(origin));
+};
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: (origin, cb) => cb(originAllowed(origin) ? null : new Error('Origin not allowed'), true) } });
+const io = new Server(server, { cors: { origin: corsOrigin } });
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: (origin, cb) => cb(originAllowed(origin) ? null : new Error('Origin not allowed')) }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '32kb' }));
 
 const safeRoom = room => ({
