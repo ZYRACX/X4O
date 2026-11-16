@@ -27,6 +27,23 @@ for each row execute function public.create_player_profile();
 alter table public.player_profiles enable row level security;
 grant all on public.player_profiles to service_role;
 
+-- Presence records support approximate live counts without depending on the
+-- backend process staying awake. Account rows are shared across their tabs.
+create table if not exists public.player_presence (
+  id text primary key,
+  account_id uuid references auth.users(id) on delete cascade,
+  guest_id uuid,
+  last_seen timestamptz not null default now(),
+  check ((account_id is not null and guest_id is null) or (account_id is null and guest_id is not null))
+);
+
+create index if not exists player_presence_active_accounts
+  on public.player_presence (last_seen desc) where account_id is not null;
+create index if not exists player_presence_active_guests
+  on public.player_presence (last_seen desc) where guest_id is not null;
+alter table public.player_presence enable row level security;
+grant all on public.player_presence to service_role;
+
 create table if not exists public.game_rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique check (code ~ '^[A-F0-9]{6}$'),

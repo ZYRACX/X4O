@@ -48,6 +48,7 @@ const matchmakingTickets = new Map();
 const activeRoomConnections = new Map();
 const disconnectTimers = new Map();
 const disconnectGraceMs = 10_000;
+const activePresenceMs = 90_000;
 
 async function getRoom(id) {
   const { data, error } = await supabase.from('game_rooms').select(roomSelect).eq('id', id).maybeSingle();
@@ -124,10 +125,11 @@ function publicQueueState(id) {
   const state = playerQueueState(id);
   if (state.state === 'pairing') {
     const pair = matchmakingPairs.get(state.pairId);
-    return { state: 'ready', queue: pair?.group, deadline: pair?.deadline, ready: pair?.ready.has(id) || false, opponent: pair?.players.find(player => player.id !== id)?.username || 'Opponent' };
+    return { state: 'ready', queue: pair?.group, waitingPlayers: pair ? matchmakingQueues[pair.group].length : 0, deadline: pair?.deadline, ready: pair?.ready.has(id) || false, opponent: pair?.players.find(player => player.id !== id)?.username || 'Opponent' };
   }
-  if (state.state === 'matched') return { state: 'matched', queue: state.queue, match: state.match };
-  return { state: state.state, queue: state.verified === false ? 'unverified' : 'verified' };
+  if (state.state === 'matched') return { state: 'matched', queue: state.queue, waitingPlayers: matchmakingQueues[state.queue]?.length || 0, match: state.match };
+  const group = state.verified === false ? 'unverified' : 'verified';
+  return { state: state.state, queue: group, waitingPlayers: matchmakingQueues[group].length };
 }
 function pairQueuedPlayers(group) {
   const queue = matchmakingQueues[group];
@@ -176,6 +178,46 @@ async function startMatchedGame(pair) {
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.post('/api/presence', async (req, res, next) => {
+  try {
+    let accountId = null;
+    const token = req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+    if (token) {
+      const { data } = await supabase.auth.getUser(token);
+      if (data.user) accountId = data.user.id;
+    }
+    const rawTicket = req.headers['x-queue-ticket'];
+    const ticket = !accountId && typeof rawTicket === 'string' ? matchmakingTickets.get(hashToken(rawTicket)) : null;
+    if (ticket?.expiresAt > Date.now()) accountId = ticket.id;
+    const guestId = typeof req.body?.guestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.body.guestId) ? req.body.guestId : null;
+    if (!accountId && !guestId) return res.status(400).json({ error: 'A valid guest identifier is required.' });
+    if (accountId && guestId) await supabase.from('player_presence').delete().eq('id', `guest:${guestId}`);
+    const identity = accountId ? `account:${accountId}` : `guest:${guestId}`;
+    const { error } = await supabase.from('player_presence').upsert({
+      id: identity, account_id: accountId, guest_id: accountId ? null : guestId, last_seen: new Date().toISOString(),
+    });
+    if (error) throw error;
+    // Occasionally prune old guest rows so a long-lived hobby deployment stays small.
+    if (Math.random() < 0.01) await supabase.from('player_presence').delete().lt('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+});
+app.get('/api/stats', async (_req, res, next) => {
+  try {
+    const activeSince = new Date(Date.now() - activePresenceMs).toISOString();
+    const [profiles, activeAccounts, activeGuests] = await Promise.all([
+      supabase.from('player_profiles').select('id', { count: 'exact', head: true }),
+      supabase.from('player_presence').select('id', { count: 'exact', head: true }).not('account_id', 'is', null).gt('last_seen', activeSince),
+      supabase.from('player_presence').select('id', { count: 'exact', head: true }).not('guest_id', 'is', null).gt('last_seen', activeSince),
+    ]);
+    for (const result of [profiles, activeAccounts, activeGuests]) if (result.error) throw result.error;
+    res.json({
+      totalPlayers: profiles.count || 0,
+      activeAccounts: activeAccounts.count || 0,
+      guestPlayers: activeGuests.count || 0,
+    });
+  } catch (error) { next(error); }
+});
 app.get('/api/admin/me', requireAdmin, (_req, res) => res.json({ admin: true }));
 app.get('/api/admin/accounts', requireAdmin, async (req, res, next) => {
   try {

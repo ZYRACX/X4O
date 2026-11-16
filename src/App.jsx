@@ -5,6 +5,7 @@ const DIRECTIONS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const emptyBoard = () => Array(SIZE * SIZE).fill(null);
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const ONLINE_SESSION_KEY = 'fourfold-online-session';
+const GUEST_NAME_KEY = 'fourfold-guest-display-name';
 let socketClientPromise;
 
 function loadSocketClient() {
@@ -38,6 +39,13 @@ function matchmakingAuthHeaders() {
     if (saved?.queueTicket) return { 'X-Queue-Ticket': saved.queueTicket };
   } catch { /* A missing local account simply means the player needs to log in. */ }
   return {};
+}
+
+function guestPresenceId() {
+  const key = 'fourfold-presence-id';
+  let id = localStorage.getItem(key);
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id); }
+  return id;
 }
 
 function scoreMove(board, index, mark) {
@@ -151,7 +159,8 @@ function App() {
   const [mode, setMode] = useState('PvE');
   const [screen, setScreen] = useState('home');
   const [isAdmin, setIsAdmin] = useState(false);
-  const [playerName, setPlayerName] = useState('');
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem(GUEST_NAME_KEY) || '');
+  const [guestNameLocked, setGuestNameLocked] = useState(() => localStorage.getItem(GUEST_NAME_KEY) !== null);
   const [account, setAccount] = useState(() => { try { return JSON.parse(localStorage.getItem('fourfold-account') || 'null')?.user || null; } catch { return null; } });
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountMode, setAccountMode] = useState('register');
@@ -171,10 +180,29 @@ function App() {
   const [queueError, setQueueError] = useState('');
   const [queueStartedAt, setQueueStartedAt] = useState(null);
   const [queueClock, setQueueClock] = useState(Date.now());
+  const [liveStats, setLiveStats] = useState(null);
   const lastQueueState = useRef('idle');
   const timer = useRef();
   const audio = useRef(null);
   const socketRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    const refreshStats = async () => {
+      try {
+        await fetch(`${API_BASE}/api/presence`, {
+          method: 'POST', headers: { ...matchmakingAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ guestId: guestPresenceId() }),
+        });
+        const response = await fetch(`${API_BASE}/api/stats`);
+        const data = await readApiResponse(response);
+        if (alive) setLiveStats(data);
+      } catch { /* Counts stay on their last successful snapshot while the API wakes or reconnects. */ }
+    };
+    refreshStats();
+    const interval = window.setInterval(refreshStats, 30_000);
+    return () => { alive = false; window.clearInterval(interval); };
+  }, [account?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -368,11 +396,20 @@ function App() {
     finally { setLobbyLoading(false); }
   };
 
+  const lockGuestName = () => {
+    if (account || !playerName.trim()) return;
+    const savedName = playerName.trim();
+    localStorage.setItem(GUEST_NAME_KEY, savedName);
+    setPlayerName(savedName);
+    setGuestNameLocked(true);
+  };
+
   const createOnlineRoom = async () => {
     setLobbyLoading(true); setOnlineMessage('');
     try {
       const response = await fetch(`${API_BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, visibility: roomVisibility }) });
       const data = await readApiResponse(response);
+      lockGuestName();
       acceptOnlineSession(data);
     } catch (error) { setOnlineMessage(error.message); }
     finally { setLobbyLoading(false); }
@@ -383,6 +420,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/rooms/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, code }) });
       const data = await readApiResponse(response);
+      lockGuestName();
       acceptOnlineSession(data);
     } catch (error) { setOnlineMessage(error.message); }
     finally { setLobbyLoading(false); }
@@ -440,7 +478,7 @@ function App() {
     <header className="topbar"><a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a><button className="home-button" onClick={leaveMatchmaking}>← Cancel queue</button></header>
     <section className="matchmaking-content" aria-live="polite">
       <div className="eyebrow"><span className={queueState.state === 'ready' ? 'connected-dot' : 'live-dot'} /> {queueState.queue === 'unverified' ? 'UNVERIFIED' : 'VERIFIED'} RANDOM 1V1 QUEUE</div>
-      {queueState.state === 'ready' ? <><div className="queue-orbit ready-orbit"><span>×</span><i>VS</i><span>○</span></div><h1>Opponent found.</h1><p className="matchmaking-copy">{queueState.opponent} is ready to play. Accept before the timer runs out.</p><div className="queue-timer ready-timer">00:{String(readySeconds).padStart(2, '0')}</div><button className="start-button ready-button" onClick={acceptMatch}>I’m ready <span>→</span></button>{queueState.ready && <p className="queue-note">You’re ready. Waiting for the other player…</p>}</> : queueState.state === 'idle' ? <><div className="queue-orbit"><span>×</span><i>?</i><span>○</span></div><h1>Queue ended.</h1><p className="matchmaking-copy">You missed the ready check and were removed. Start again to find another match.</p><button className="start-button" onClick={startMatchmaking}>Queue again <span>→</span></button></> : queueState.state === 'matched' ? <><h1>Match found.</h1><p className="matchmaking-copy">Connecting you to your game…</p></> : <><div className="queue-orbit"><span>×</span><i>···</i><span>○</span></div><h1>Finding your match.</h1><p className="matchmaking-copy">You’re in line. We’ll pair you with the next available player.</p><div className="queue-timer">{String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')}</div><p className="queue-note">Searching for an opponent</p></>}
+      {queueState.state === 'ready' ? <><div className="queue-orbit ready-orbit"><span>×</span><i>VS</i><span>○</span></div><h1>Opponent found.</h1><p className="matchmaking-copy">{queueState.opponent} is ready to play. Accept before the timer runs out.</p><div className="queue-timer ready-timer">00:{String(readySeconds).padStart(2, '0')}</div><button className="start-button ready-button" onClick={acceptMatch}>I’m ready <span>→</span></button>{queueState.ready && <p className="queue-note">You’re ready. Waiting for the other player…</p>}</> : queueState.state === 'idle' ? <><div className="queue-orbit"><span>×</span><i>?</i><span>○</span></div><h1>Queue ended.</h1><p className="matchmaking-copy">You missed the ready check and were removed. Start again to find another match.</p><button className="start-button" onClick={startMatchmaking}>Queue again <span>→</span></button></> : queueState.state === 'matched' ? <><h1>Match found.</h1><p className="matchmaking-copy">Connecting you to your game…</p></> : <><div className="queue-orbit"><span>×</span><i>···</i><span>○</span></div><h1>Finding your match.</h1><p className="matchmaking-copy">You’re in line. We’ll pair you with the next available player.</p><div className="queue-timer">{String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')}</div><div className="queue-count"><strong>{queueState.waitingPlayers ?? '—'}</strong><span>PLAYERS WAITING</span></div><p className="queue-note">Searching for an opponent</p></>}
       {queueError && <p className="account-error" role="alert">{queueError}</p>}
     </section>
     <footer><span>X4O <i>·</i> {queueState.queue === 'unverified' ? 'UNVERIFIED' : 'VERIFIED'} QUEUE</span><span>FIRST COME. FIRST SERVED.</span></footer>
@@ -449,7 +487,7 @@ function App() {
   if (screen === 'home') return <main className="app-shell home-shell">
     <header className="topbar">
       <a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a>
-      <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span>{isAdmin && <button className="home-button admin-entry" onClick={() => setScreen('admin')}>Admin panel</button>}<button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setIsAdmin(false); setPlayerName(''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
+      <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span>{isAdmin && <button className="home-button admin-entry" onClick={() => setScreen('admin')}>Admin panel</button>}<button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setIsAdmin(false); setPlayerName(localStorage.getItem(GUEST_NAME_KEY) || ''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
     </header>
     <section className="home-content" id="top">
       <div className="home-intro">
@@ -474,9 +512,13 @@ function App() {
           <span className="mode-card-radio" />
         </button>
       </div>
+      <div className="home-live-stats" aria-live="polite">
+        <div><span>TOTAL PLAYERS</span><strong>{liveStats?.totalPlayers ?? '—'}</strong></div>
+        <div><span>CONCURRENT PLAYERS</span><strong>{liveStats ? <>{liveStats.activeAccounts} <i>+</i> {liveStats.guestPlayers}</> : '—'}</strong></div>
+      </div>
       {mode === 'online' ? <section className="online-lobby" aria-label="Online multiplayer lobby">
         <div className="matchmaking-panel"><div><strong>Random 1v1</strong><small>Verified and unverified accounts have separate queues.</small></div>{account?.verified || account?.queueTicket ? <button className="start-button" onClick={startMatchmaking}>Find a match <span>→</span></button> : <button className="secondary-action" onClick={() => { setAccountMode('login'); setAccountOpen(true); }}>Log in to unlock</button>}</div>
-        <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => setPlayerName(e.target.value)} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account} aria-readonly={!!account} /></label>
+        <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => { const value = e.target.value; setPlayerName(value); if (value) localStorage.setItem(GUEST_NAME_KEY, value); else localStorage.removeItem(GUEST_NAME_KEY); }} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account || guestNameLocked} aria-readonly={!!account || guestNameLocked} />{guestNameLocked && !account && <small className="guest-name-note">Saved for this browser. Clear this site’s data to change it.</small>}</label>
         <div className="create-room-panel"><div><strong>Create a room</strong><small>Choose whether your room appears in the public list.</small></div><div className="create-room-controls"><select aria-label="Room visibility" value={roomVisibility} onChange={e => setRoomVisibility(e.target.value)}><option value="private">Private</option><option value="public">Public</option></select><button className="start-button" disabled={!displayName || lobbyLoading} onClick={createOnlineRoom}>Create {roomVisibility} room <span>→</span></button></div></div>
         <form className="join-room-form" onSubmit={e => { e.preventDefault(); joinOnlineRoom(joinCode); }}><label className="name-field">JOIN WITH A ROOM CODE<input value={joinCode} maxLength={6} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, ''))} placeholder="6 character code" /></label><button className="secondary-action" disabled={!displayName || joinCode.length !== 6 || lobbyLoading}>Join room</button></form>
         <div className="public-rooms"><div className="public-rooms-heading"><div><strong>Public rooms</strong><small>Open rooms waiting for another player</small></div><button className="refresh-button" onClick={loadPublicRooms} disabled={lobbyLoading} aria-label="Refresh public rooms">↻</button></div>
