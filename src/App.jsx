@@ -276,7 +276,7 @@ function App() {
   const createOnlineRoom = async () => {
     setLobbyLoading(true); setOnlineMessage('');
     try {
-      const response = await fetch(`${API_BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName, visibility: roomVisibility }) });
+      const response = await fetch(`${API_BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, visibility: roomVisibility }) });
       const data = await readApiResponse(response);
       acceptOnlineSession(data);
     } catch (error) { setOnlineMessage(error.message); }
@@ -286,7 +286,7 @@ function App() {
   const joinOnlineRoom = async code => {
     setLobbyLoading(true); setOnlineMessage('');
     try {
-      const response = await fetch(`${API_BASE}/api/rooms/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName, code }) });
+      const response = await fetch(`${API_BASE}/api/rooms/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, code }) });
       const data = await readApiResponse(response);
       acceptOnlineSession(data);
     } catch (error) { setOnlineMessage(error.message); }
@@ -295,6 +295,7 @@ function App() {
 
   const winner = scores.X === scores.O ? 'It’s a draw' : scores.X > scores.O ? 'You win!' : 'Bot wins';
   const filled = board.filter(Boolean).length;
+  const displayName = account?.username || playerName.trim();
   const submitAccount = async event => {
     event.preventDefault(); setAccountError(''); setAccountNotice(''); setAccountBusy(true);
     const form = new FormData(event.currentTarget);
@@ -339,11 +340,11 @@ function App() {
         </button>
       </div>
       {mode === 'online' ? <section className="online-lobby" aria-label="Online multiplayer lobby">
-        <label className="name-field">YOUR DISPLAY NAME<input value={playerName} maxLength={24} onChange={e => setPlayerName(e.target.value)} placeholder="Enter your name" autoComplete="nickname" /></label>
-        <div className="create-room-panel"><div><strong>Create a room</strong><small>Choose whether your room appears in the public list.</small></div><div className="create-room-controls"><select aria-label="Room visibility" value={roomVisibility} onChange={e => setRoomVisibility(e.target.value)}><option value="private">Private</option><option value="public">Public</option></select><button className="start-button" disabled={!playerName.trim() || lobbyLoading} onClick={createOnlineRoom}>Create {roomVisibility} room <span>→</span></button></div></div>
-        <form className="join-room-form" onSubmit={e => { e.preventDefault(); joinOnlineRoom(joinCode); }}><label className="name-field">JOIN WITH A ROOM CODE<input value={joinCode} maxLength={6} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, ''))} placeholder="6 character code" /></label><button className="secondary-action" disabled={!playerName.trim() || joinCode.length !== 6 || lobbyLoading}>Join room</button></form>
+        <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => setPlayerName(e.target.value)} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account} aria-readonly={!!account} /></label>
+        <div className="create-room-panel"><div><strong>Create a room</strong><small>Choose whether your room appears in the public list.</small></div><div className="create-room-controls"><select aria-label="Room visibility" value={roomVisibility} onChange={e => setRoomVisibility(e.target.value)}><option value="private">Private</option><option value="public">Public</option></select><button className="start-button" disabled={!displayName || lobbyLoading} onClick={createOnlineRoom}>Create {roomVisibility} room <span>→</span></button></div></div>
+        <form className="join-room-form" onSubmit={e => { e.preventDefault(); joinOnlineRoom(joinCode); }}><label className="name-field">JOIN WITH A ROOM CODE<input value={joinCode} maxLength={6} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, ''))} placeholder="6 character code" /></label><button className="secondary-action" disabled={!displayName || joinCode.length !== 6 || lobbyLoading}>Join room</button></form>
         <div className="public-rooms"><div className="public-rooms-heading"><div><strong>Public rooms</strong><small>Open rooms waiting for another player</small></div><button className="refresh-button" onClick={loadPublicRooms} disabled={lobbyLoading} aria-label="Refresh public rooms">↻</button></div>
-          {publicRooms.length ? <div className="room-list">{publicRooms.map(room => <div className="room-list-item" key={room.id}><div className="room-owner"><span className="room-avatar">{room.creatorName.slice(0, 1).toUpperCase()}</span><span><strong>{room.creatorName}</strong><small>Room {room.code}</small></span></div><button className="secondary-action" disabled={!playerName.trim() || lobbyLoading} onClick={() => joinOnlineRoom(room.code)}>Join</button></div>)}</div> : <p className="empty-rooms">{lobbyLoading ? 'Loading rooms…' : 'No public rooms are waiting. Create one to get started.'}</p>}
+          {publicRooms.length ? <div className="room-list">{publicRooms.map(room => <div className="room-list-item" key={room.id}><div className="room-owner"><span className="room-avatar">{room.creatorName.slice(0, 1).toUpperCase()}</span><span><strong>{room.creatorName}</strong><small>Room {room.code}</small></span></div><button className="secondary-action" disabled={!displayName || lobbyLoading} onClick={() => joinOnlineRoom(room.code)}>Join</button></div>)}</div> : <p className="empty-rooms">{lobbyLoading ? 'Loading rooms…' : 'No public rooms are waiting. Create one to get started.'}</p>}
         </div>
         {onlineMessage && <p className="online-message" role="alert">{onlineMessage}</p>}
       </section> : <div className="home-actions">
