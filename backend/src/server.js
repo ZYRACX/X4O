@@ -384,7 +384,13 @@ app.post('/api/rooms', async (req, res, next) => {
       board: Array(100).fill(null), scores: { X: 0, O: 0 }, turn: 'X', winning_cells: [],
     };
     const { data, error } = await supabase.from('game_rooms').insert(room).select(roomSelect).single();
-    if (error) throw error;
+    if (error) {
+      if (error.code === '42703' || error.code === 'PGRST204') {
+        console.error('Room creation failed because the game_rooms schema is out of date:', error);
+        return res.status(503).json({ error: 'Room service needs a database schema update. Run backend/supabase/migrate_room_schema.sql in the Supabase SQL Editor, then try again.' });
+      }
+      throw error;
+    }
     res.status(201).json({ room: safeRoom(data), seat: 'X', playerToken: token });
   } catch (error) { next(error); }
 });

@@ -4,6 +4,8 @@
 
 Create a Supabase project, open **SQL Editor**, and run [`backend/supabase/schema.sql`](backend/supabase/schema.sql). If you already ran an earlier version of the schema, run it again to add the username reservation table, presence table, Auth trigger, and online match winner field.
 
+If room creation reports that the database schema is out of date, run [`backend/supabase/migrate_room_schema.sql`](backend/supabase/migrate_room_schema.sql) in the same SQL Editor. It adds the online winner field and allows the `G ` guest marker within the room name limit.
+
 In the Supabase project settings, copy the project URL and a **secret key** for server-side access. The key is a backend secret: never put it in a `VITE_` variable or commit it. The backend also accepts the legacy `service_role` key under `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## 2. Deploy the backend to Render
