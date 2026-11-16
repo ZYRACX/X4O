@@ -422,7 +422,10 @@ function App() {
       const data = await readApiResponse(response);
       lockGuestName();
       acceptOnlineSession(data);
-    } catch (error) { setOnlineMessage(error.message); }
+    } catch (error) {
+      setOnlineMessage(error.message);
+      if (!account && error.message.toLowerCase().includes('already taken in this room')) setGuestNameLocked(false);
+    }
     finally { setLobbyLoading(false); }
   };
 
@@ -518,7 +521,7 @@ function App() {
       </div>
       {mode === 'online' ? <section className="online-lobby" aria-label="Online multiplayer lobby">
         <div className="matchmaking-panel"><div><strong>Random 1v1</strong><small>Verified and unverified accounts have separate queues.</small></div>{account?.verified || account?.queueTicket ? <button className="start-button" onClick={startMatchmaking}>Find a match <span>→</span></button> : <button className="secondary-action" onClick={() => { setAccountMode('login'); setAccountOpen(true); }}>Log in to unlock</button>}</div>
-        <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => { const value = e.target.value; setPlayerName(value); if (value) localStorage.setItem(GUEST_NAME_KEY, value); else localStorage.removeItem(GUEST_NAME_KEY); }} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account || guestNameLocked} aria-readonly={!!account || guestNameLocked} />{guestNameLocked && !account && <small className="guest-name-note">Saved for this browser. Clear this site’s data to change it.</small>}</label>
+        <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => { const value = e.target.value; setPlayerName(value); if (value) localStorage.setItem(GUEST_NAME_KEY, value); else localStorage.removeItem(GUEST_NAME_KEY); }} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account || guestNameLocked} aria-readonly={!!account || guestNameLocked} />{guestNameLocked && !account && <small className="guest-name-note">Saved for this browser. It can be changed if a room already has that name.</small>}</label>
         <div className="create-room-panel"><div><strong>Create a room</strong><small>Choose whether your room appears in the public list.</small></div><div className="create-room-controls"><select aria-label="Room visibility" value={roomVisibility} onChange={e => setRoomVisibility(e.target.value)}><option value="private">Private</option><option value="public">Public</option></select><button className="start-button" disabled={!displayName || lobbyLoading} onClick={createOnlineRoom}>Create {roomVisibility} room <span>→</span></button></div></div>
         <form className="join-room-form" onSubmit={e => { e.preventDefault(); joinOnlineRoom(joinCode); }}><label className="name-field">JOIN WITH A ROOM CODE<input value={joinCode} maxLength={6} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, ''))} placeholder="6 character code" /></label><button className="secondary-action" disabled={!displayName || joinCode.length !== 6 || lobbyLoading}>Join room</button></form>
         <div className="public-rooms"><div className="public-rooms-heading"><div><strong>Public rooms</strong><small>Open rooms waiting for another player</small></div><button className="refresh-button" onClick={loadPublicRooms} disabled={lobbyLoading} aria-label="Refresh public rooms">↻</button></div>

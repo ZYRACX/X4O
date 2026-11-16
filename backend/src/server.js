@@ -395,6 +395,9 @@ app.post('/api/rooms/join', async (req, res, next) => {
     const { data: room, error: findError } = await supabase.from('game_rooms').select(roomSelect).eq('code', code).maybeSingle();
     if (findError) throw findError;
     if (!room || room.status !== 'waiting' || room.player2_token_hash || new Date(room.expires_at) <= new Date()) return res.status(409).json({ error: 'That room is not available. It may have started or closed.' });
+    if (playerName.toLocaleLowerCase() === String(room.player1_name || '').trim().toLocaleLowerCase()) {
+      return res.status(409).json({ error: 'That username is already taken in this room. Choose a different name to join.' });
+    }
     const token = newToken();
     const { data, error } = await supabase.from('game_rooms').update({
       player2_name: playerName, player2_token_hash: hashToken(token), status: 'playing', expires_at: null, updated_at: new Date().toISOString(),
