@@ -363,18 +363,18 @@ function App() {
   };
 
   if (screen === 'matchmaking') return <main className="app-shell home-shell matchmaking-shell">
-    <header className="topbar"><a className="brand" href="#top" aria-label="Fourfold home"><span className="brand-mark">4</span><span>FOURFOLD</span></a><button className="home-button" onClick={leaveMatchmaking}>← Cancel queue</button></header>
+    <header className="topbar"><a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a><button className="home-button" onClick={leaveMatchmaking}>← Cancel queue</button></header>
     <section className="matchmaking-content" aria-live="polite">
       <div className="eyebrow"><span className={queueState.state === 'ready' ? 'connected-dot' : 'live-dot'} /> RANDOM 1V1 MATCHMAKING</div>
       {queueState.state === 'ready' ? <><div className="queue-orbit ready-orbit"><span>×</span><i>VS</i><span>○</span></div><h1>Opponent found.</h1><p className="matchmaking-copy">{queueState.opponent} is ready to play. Accept before the timer runs out.</p><div className="queue-timer ready-timer">00:{String(readySeconds).padStart(2, '0')}</div><button className="start-button ready-button" onClick={acceptMatch}>I’m ready <span>→</span></button>{queueState.ready && <p className="queue-note">You’re ready. Waiting for the other player…</p>}</> : queueState.state === 'idle' ? <><div className="queue-orbit"><span>×</span><i>?</i><span>○</span></div><h1>Queue ended.</h1><p className="matchmaking-copy">You missed the ready check and were removed. Start again to find another match.</p><button className="start-button" onClick={startMatchmaking}>Queue again <span>→</span></button></> : queueState.state === 'matched' ? <><h1>Match found.</h1><p className="matchmaking-copy">Connecting you to your game…</p></> : <><div className="queue-orbit"><span>×</span><i>···</i><span>○</span></div><h1>Finding your match.</h1><p className="matchmaking-copy">You’re in line. We’ll pair you with the next available player.</p><div className="queue-timer">{String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')}</div><p className="queue-note">Searching for an opponent</p></>}
       {queueError && <p className="account-error" role="alert">{queueError}</p>}
     </section>
-    <footer><span>FOURFOLD <i>·</i> RANDOM 1V1</span><span>FIRST COME. FIRST SERVED.</span></footer>
+    <footer><span>X4O <i>·</i> RANDOM 1V1</span><span>FIRST COME. FIRST SERVED.</span></footer>
   </main>;
 
   if (screen === 'home') return <main className="app-shell home-shell">
     <header className="topbar">
-      <a className="brand" href="#top" aria-label="Fourfold home"><span className="brand-mark">4</span><span>FOURFOLD</span></a>
+      <a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a>
       <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span><button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setPlayerName(''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
     </header>
     <section className="home-content" id="top">
@@ -415,13 +415,13 @@ function App() {
       </div>}
       <div className="home-rules"><span><b>4</b> in a row = 1 point</span><i>·</i><span>Most points wins</span><i>·</i><span>100 cells</span></div>
     </section>
-    <footer><span>FOURFOLD <i>·</i> SCORE MODE</span><span>CHOOSE YOUR GAME</span></footer>
+    <footer><span>X4O <i>·</i> SCORE MODE</span><span>CHOOSE YOUR GAME</span></footer>
     {accountOpen && <div className="account-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setAccountOpen(false); }}><section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title"><button className="account-close" onClick={() => setAccountOpen(false)} aria-label="Close">×</button><div className="eyebrow"><span className="live-dot" /> PLAYER ACCOUNT</div><h2 id="account-title">{accountMode === 'register' ? 'Reserve your name.' : 'Welcome back.'}</h2><p>{accountMode === 'register' ? 'Create an account to claim a username for online play.' : 'Log in with the email and password linked to your account.'}</p><form className="account-form" onSubmit={submitAccount}>{accountMode === 'register' && <label>USERNAME<input name="username" required minLength="3" maxLength="20" pattern="[A-Za-z0-9_]+" autoComplete="username" placeholder="Your player name" /></label>}<label>EMAIL<input type="email" name="email" required maxLength="254" autoComplete="email" placeholder="you@example.com" /></label><label>PASSWORD<input type="password" name="password" required minLength="8" maxLength="72" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} placeholder="At least 8 characters" /></label><button className="start-button" disabled={accountBusy}>{accountBusy ? 'Please wait…' : accountMode === 'register' ? 'Create account' : 'Log in'} <span>→</span></button></form>{accountError && <p className="account-error" role="alert">{accountError}</p>}{accountNotice && <p className="account-notice" role="status">{accountNotice}</p>}<button className="account-switch" onClick={() => { setAccountMode(accountMode === 'register' ? 'login' : 'register'); setAccountError(''); setAccountNotice(''); }}>{accountMode === 'register' ? 'Already registered? Log in' : 'New here? Create an account'}</button></section></div>}
   </main>;
 
   return <main className="app-shell">
     <header className="topbar">
-      <a className="brand" href="#top" aria-label="Fourfold home"><span className="brand-mark">4</span><span>FOURFOLD</span></a>
+      <a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a>
       <div className="top-actions">
         {mode === 'PvE' && <label className="difficulty"><span>BOT LEVEL</span><select value={difficulty} onChange={e => setDifficulty(e.target.value)} disabled={status !== 'playing'}><option>Easy</option><option>Medium</option></select></label>}
         {mode === 'online' && <div className="online-game-badge"><span className={connectionState === 'Connected' ? 'connected-dot' : 'disconnected-dot'} />{connectionState || 'Connecting'} <b>{onlineRoom?.code}</b><button onClick={async () => { try { await navigator.clipboard.writeText(onlineRoom.code); setOnlineMessage('Room code copied.'); } catch { setOnlineMessage(`Share room code ${onlineRoom.code} with your opponent.`); } }} aria-label="Copy room code">Copy</button></div>}
@@ -463,7 +463,7 @@ function App() {
         <div className="board-footer"><span><kbd>4</kbd> IN A ROW = <b>1 POINT</b></span><span>{status === 'finished' ? 'GAME COMPLETE' : 'FIRST TO OUTSCORE WINS'}</span></div>
       </div>
     </section>
-    <footer><span>FOURFOLD <i>·</i> SCORE MODE</span><span>100 CELLS. ONE WINNER.</span></footer>
+    <footer><span>X4O <i>·</i> SCORE MODE</span><span>100 CELLS. ONE WINNER.</span></footer>
   </main>;
 }
 

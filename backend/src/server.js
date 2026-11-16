@@ -299,4 +299,4 @@ app.use((error, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT || 3001);
-server.listen(port, '0.0.0.0', () => console.log(`Fourfold backend listening on ${port}`));
+server.listen(port, '0.0.0.0', () => console.log(`X4O backend listening on ${port}`));
