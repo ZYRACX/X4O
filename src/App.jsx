@@ -407,7 +407,7 @@ function App() {
   const createOnlineRoom = async () => {
     setLobbyLoading(true); setOnlineMessage('');
     try {
-      const response = await fetch(`${API_BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, visibility: roomVisibility }) });
+      const response = await fetch(`${API_BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, isGuest: !account, visibility: roomVisibility }) });
       const data = await readApiResponse(response);
       lockGuestName();
       acceptOnlineSession(data);
@@ -418,7 +418,7 @@ function App() {
   const joinOnlineRoom = async code => {
     setLobbyLoading(true); setOnlineMessage('');
     try {
-      const response = await fetch(`${API_BASE}/api/rooms/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, code }) });
+      const response = await fetch(`${API_BASE}/api/rooms/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerName: displayName, isGuest: !account, code }) });
       const data = await readApiResponse(response);
       lockGuestName();
       acceptOnlineSession(data);

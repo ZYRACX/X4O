@@ -40,6 +40,8 @@ const hashToken = token => crypto.createHash('sha256').update(token).digest('hex
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 const newCode = () => crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
 const cleanName = value => typeof value === 'string' ? value.trim().replace(/[<>\u0000-\u001f]/g, '').slice(0, 24) : '';
+const roomPlayerName = (name, isGuest) => isGuest ? `G ${name}` : name;
+const comparablePlayerName = name => String(name || '').replace(/^G\s+/i, '').trim().toLocaleLowerCase();
 const roomSelect = 'id,code,visibility,status,creator_name,player1_name,player2_name,board,scores,turn,last_move,winning_cells,winner_seat,created_at,expires_at,player1_token_hash,player2_token_hash';
 const matchmakingQueues = { verified: [], unverified: [] };
 const matchmakingPlayers = new Map();
@@ -370,9 +372,10 @@ app.get('/api/rooms', async (_req, res, next) => {
 
 app.post('/api/rooms', async (req, res, next) => {
   try {
-    const creatorName = cleanName(req.body?.playerName);
+    const creatorDisplayName = cleanName(req.body?.playerName);
+    const creatorName = roomPlayerName(creatorDisplayName, req.body?.isGuest === true);
     const visibility = req.body?.visibility;
-    if (!creatorName) return res.status(400).json({ error: 'Enter a player name (up to 24 characters).' });
+    if (!creatorDisplayName) return res.status(400).json({ error: 'Enter a player name (up to 24 characters).' });
     if (!['public', 'private'].includes(visibility)) return res.status(400).json({ error: 'Choose a public or private room.' });
     const token = newToken();
     const room = {
@@ -389,13 +392,14 @@ app.post('/api/rooms', async (req, res, next) => {
 app.post('/api/rooms/join', async (req, res, next) => {
   try {
     const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
-    const playerName = cleanName(req.body?.playerName);
+    const playerDisplayName = cleanName(req.body?.playerName);
+    const playerName = roomPlayerName(playerDisplayName, req.body?.isGuest === true);
     if (!/^[A-F0-9]{6}$/.test(code)) return res.status(400).json({ error: 'Enter a valid six-character room code.' });
-    if (!playerName) return res.status(400).json({ error: 'Enter a player name (up to 24 characters).' });
+    if (!playerDisplayName) return res.status(400).json({ error: 'Enter a player name (up to 24 characters).' });
     const { data: room, error: findError } = await supabase.from('game_rooms').select(roomSelect).eq('code', code).maybeSingle();
     if (findError) throw findError;
     if (!room || room.status !== 'waiting' || room.player2_token_hash || new Date(room.expires_at) <= new Date()) return res.status(409).json({ error: 'That room is not available. It may have started or closed.' });
-    if (playerName.toLocaleLowerCase() === String(room.player1_name || '').trim().toLocaleLowerCase()) {
+    if (comparablePlayerName(playerDisplayName) === comparablePlayerName(room.player1_name)) {
       return res.status(409).json({ error: 'That username is already taken in this room. Choose a different name to join.' });
     }
     const token = newToken();
