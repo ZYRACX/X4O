@@ -19,6 +19,7 @@ Set these Render environment variables:
 - `SUPABASE_URL` — project URL
 - `SUPABASE_SECRET_KEY` — Supabase secret key
 - `WEB_ORIGIN` — `https://x4-o.vercel.app` (your deployed frontend origin; use comma-separated origins if you add more frontends)
+- `APP_ORIGIN` — `https://x4-o.vercel.app` (where Supabase should send players after email confirmation)
 - `NODE_VERSION` — `20` (set in Render's environment)
 
 Render supplies `PORT` automatically. The backend binds to `0.0.0.0` and exposes `/health` for health checks. Render Web Services support WebSocket connections; Socket.IO also falls back to polling when needed.
@@ -33,4 +34,4 @@ The room creator receives a six-character code and a private player token. Share
 
 ## Player accounts
 
-Players can optionally create an account from the home screen. Supabase Auth stores the email and password, while the profile trigger reserves the chosen username (case-insensitively). Configure the Supabase Auth email confirmation setting for the desired sign-up flow. When confirmation is required, players should confirm their email and then log in. The browser stores the returned Auth session locally; logging out clears that local session.
+Players can optionally create an account from the home screen. Supabase Auth stores the email and password, while the profile trigger reserves the chosen username (case-insensitively). Set Supabase **Authentication → URL Configuration → Site URL** to `https://x4-o.vercel.app`, and add that same URL to **Redirect URLs**. Configure the Render backend's `APP_ORIGIN` to `https://x4-o.vercel.app` as well. These settings send confirmation links back to the deployed game instead of a local development address. The game completes the confirmation and stores the returned Auth session locally; logging out clears that local session.

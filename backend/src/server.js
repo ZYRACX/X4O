@@ -14,6 +14,7 @@ if (!SUPABASE_URL || !SUPABASE_SECRET) throw new Error('Set SUPABASE_URL and SUP
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET, { auth: { persistSession: false, autoRefreshToken: false } });
 const normalizeOrigin = origin => origin.trim().replace(/\/+$/, '');
 const allowedOrigins = (process.env.WEB_ORIGIN || 'http://localhost:5173').split(',').map(value => normalizeOrigin(value)).filter(Boolean);
+const appOrigin = normalizeOrigin(process.env.APP_ORIGIN || allowedOrigins[0] || 'http://localhost:5173');
 const originAllowed = origin => !origin || allowedOrigins.includes('*') || allowedOrigins.includes(normalizeOrigin(origin));
 const corsOrigin = (origin, callback) => {
   if (!origin || allowedOrigins.includes('*')) return callback(null, true);
@@ -61,9 +62,19 @@ app.post('/api/auth/register', async (req, res, next) => {
     if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters using letters, numbers, or underscores.' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
     if (typeof password !== 'string' || password.length < 8 || password.length > 72) return res.status(400).json({ error: 'Password must be between 8 and 72 characters.' });
-    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username } } });
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username }, emailRedirectTo: appOrigin } });
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ user: { id: data.user.id, email: data.user.email, username }, session: data.session, confirmationRequired: !data.session });
+  } catch (error) { next(error); }
+});
+app.post('/api/auth/confirm', async (req, res, next) => {
+  try {
+    const access_token = req.body?.access_token;
+    const refresh_token = req.body?.refresh_token;
+    if (typeof access_token !== 'string' || typeof refresh_token !== 'string') return res.status(400).json({ error: 'Confirmation link is missing its session tokens.' });
+    const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+    if (error) return res.status(401).json({ error: 'That confirmation link is invalid or expired. Request a new one and try again.' });
+    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '' }, session: data.session });
   } catch (error) { next(error); }
 });
 app.post('/api/auth/login', async (req, res, next) => {

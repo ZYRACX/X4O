@@ -125,6 +125,21 @@ function App() {
   const audio = useRef(null);
   const socketRef = useRef(null);
 
+  useEffect(() => {
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const access_token = hash.get('access_token');
+    const refresh_token = hash.get('refresh_token');
+    if (!access_token || !refresh_token) return;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    fetch(`${API_BASE}/api/auth/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token, refresh_token }) })
+      .then(readApiResponse)
+      .then(data => {
+        localStorage.setItem('fourfold-account', JSON.stringify({ user: data.user, session: data.session }));
+        setAccount(data.user); setPlayerName(data.user.username);
+      })
+      .catch(error => { setAccountError(error.message); setAccountMode('login'); setAccountOpen(true); });
+  }, []);
+
   const acceptOnlineSession = useCallback(({ room, seat, playerToken }) => {
     setOnlineRoom(room); setOnlineSeat(seat); setOnlineToken(playerToken);
     localStorage.setItem(ONLINE_SESSION_KEY, JSON.stringify({ roomId: room.id, playerToken }));
