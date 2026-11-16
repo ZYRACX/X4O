@@ -75,6 +75,42 @@ function countPotential(board, index, mark, target = 4) {
   return value;
 }
 
+function AdminPanel({ onBack }) {
+  const [accounts, setAccounts] = useState([]), [query, setQuery] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [editing, setEditing] = useState(null);
+  const adminHeaders = () => {
+    const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
+    return { Authorization: `Bearer ${saved?.session?.access_token || ''}`, 'Content-Type': 'application/json' };
+  };
+  const load = async () => {
+    setBusy(true); setError('');
+    try { const data = await readApiResponse(await fetch(`${API_BASE}/api/admin/accounts`, { headers: adminHeaders() })); setAccounts(data.accounts || []); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { load(); }, []);
+  const update = async (path, options, success) => {
+    setBusy(true); setError(''); setNotice('');
+    try { await readApiResponse(await fetch(`${API_BASE}${path}`, { ...options, headers: adminHeaders() })); setNotice(success); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const filtered = accounts.filter(account => `${account.username} ${account.email} ${account.id}`.toLowerCase().includes(query.toLowerCase()));
+  return <main className="app-shell admin-shell">
+    <header className="topbar"><a className="brand" href="#top"><span className="brand-mark">X4O</span><span>X4O</span></a><button className="home-button" onClick={onBack}>← Back to game</button></header>
+    <section className="admin-content">
+      <div className="admin-heading"><div><div className="eyebrow"><span className="live-dot" /> ADMINISTRATION</div><h1>Accounts<span>.</span></h1><p>Review player details and manage account access.</p></div><button className="secondary-action" onClick={load} disabled={busy}>↻ Refresh</button></div>
+      <div className="admin-summary"><div><small>TOTAL ACCOUNTS</small><strong>{accounts.length}</strong></div><div><small>VERIFIED</small><strong>{accounts.filter(a => a.verified).length}</strong></div><div><small>SUSPENDED</small><strong>{accounts.filter(a => a.suspended).length}</strong></div></div>
+      <label className="admin-search"><span>⌕</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search username, email, or account ID" /></label>
+      {error && <p className="account-error" role="alert">{error}</p>}{notice && <p className="account-notice" role="status">{notice}</p>}
+      <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>PLAYER</th><th>STATUS</th><th>JOINED</th><th>LAST ACTIVE</th><th>ACTIONS</th></tr></thead><tbody>
+        {filtered.map(account => <tr key={account.id}><td><div className="admin-player"><span className="room-avatar">{(account.username || '?')[0].toUpperCase()}</span><span><strong>{account.username || 'No username'}</strong><small>{account.email}</small></span></div></td><td><span className={`admin-status ${account.suspended ? 'suspended' : 'active-status'}`}>{account.suspended ? 'Suspended' : 'Active'}</span><small className="verified-mark">{account.verified ? 'Verified' : 'Unverified'}</small></td><td>{account.createdAt ? new Date(account.createdAt).toLocaleDateString() : '—'}</td><td>{account.lastSignInAt ? new Date(account.lastSignInAt).toLocaleDateString() : 'Never'}</td><td><div className="admin-actions"><button onClick={() => setEditing(account)}>Edit</button><button onClick={() => { if (window.confirm(`${account.suspended ? 'Restore' : 'Suspend'} ${account.username}'s account?`)) update(`/api/admin/accounts/${account.id}/suspend`, { method: 'POST', body: JSON.stringify({ suspended: !account.suspended }) }, `Account ${account.suspended ? 'restored' : 'suspended'}.`); }} disabled={busy}>{account.suspended ? 'Restore' : 'Suspend'}</button><button className="delete-action" onClick={() => { if (window.confirm(`Permanently delete ${account.username} (${account.email})? This cannot be undone.`)) update(`/api/admin/accounts/${account.id}`, { method: 'DELETE' }, 'Account deleted.'); }} disabled={busy}>Delete</button></div></td></tr>)}
+        {!filtered.length && <tr><td colSpan="5" className="admin-empty">{busy ? 'Loading accounts…' : 'No accounts match this search.'}</td></tr>}
+      </tbody></table></div>
+    </section>
+    {editing && <div className="account-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setEditing(null); }}><section className="account-dialog" role="dialog" aria-modal="true"><button className="account-close" onClick={() => setEditing(null)} aria-label="Close">×</button><div className="eyebrow"><span className="live-dot" /> EDIT PLAYER</div><h2>Update account.</h2><p>Changes to email may require the player to confirm their new address.</p><form className="account-form" onSubmit={async e => { e.preventDefault(); const form = new FormData(e.currentTarget); await update(`/api/admin/accounts/${editing.id}`, { method: 'PATCH', body: JSON.stringify({ username: form.get('username'), email: form.get('email') }) }, 'Account details updated.'); setEditing(null); }}><label>USERNAME<input name="username" defaultValue={editing.username} required minLength="3" maxLength="20" pattern="[A-Za-z0-9_]+" /></label><label>EMAIL<input name="email" type="email" defaultValue={editing.email} required /></label><button className="start-button" disabled={busy}>Save changes <span>→</span></button></form></section></div>}
+  </main>;
+}
+
 function chooseBotMove(board) {
   const available = board.map((v, i) => v === null ? i : -1).filter(i => i >= 0);
   if (available.length === SIZE * SIZE) return 44;
@@ -114,6 +150,7 @@ function App() {
   const [thinking, setThinking] = useState(false);
   const [mode, setMode] = useState('PvE');
   const [screen, setScreen] = useState('home');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [account, setAccount] = useState(() => { try { return JSON.parse(localStorage.getItem('fourfold-account') || 'null')?.user || null; } catch { return null; } });
   const [accountOpen, setAccountOpen] = useState(false);
@@ -138,6 +175,14 @@ function App() {
   const timer = useRef();
   const audio = useRef(null);
   const socketRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    const token = (() => { try { return JSON.parse(localStorage.getItem('fourfold-account') || 'null')?.session?.access_token; } catch { return null; } })();
+    if (!token) { setIsAdmin(false); return () => { alive = false; }; }
+    fetch(`${API_BASE}/api/admin/me`, { headers: { Authorization: `Bearer ${token}` } }).then(response => { if (alive) setIsAdmin(response.ok); }).catch(() => { if (alive) setIsAdmin(false); });
+    return () => { alive = false; };
+  }, [account?.id]);
 
   useEffect(() => {
     const hash = new URLSearchParams(window.location.hash.slice(1));
@@ -371,6 +416,7 @@ function App() {
   const displayName = account?.username || playerName.trim();
   const elapsedSeconds = queueStartedAt ? Math.max(0, Math.floor((queueClock - queueStartedAt) / 1000)) : 0;
   const readySeconds = queueState.deadline ? Math.max(0, Math.ceil((queueState.deadline - queueClock) / 1000)) : 10;
+  if (screen === 'admin') return <AdminPanel onBack={() => setScreen('home')} />;
   const submitAccount = async event => {
     event.preventDefault(); setAccountError(''); setAccountNotice(''); setAccountBusy(true);
     const form = new FormData(event.currentTarget);
@@ -403,7 +449,7 @@ function App() {
   if (screen === 'home') return <main className="app-shell home-shell">
     <header className="topbar">
       <a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a>
-      <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span><button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setPlayerName(''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
+      <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span>{isAdmin && <button className="home-button admin-entry" onClick={() => setScreen('admin')}>Admin panel</button>}<button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setIsAdmin(false); setPlayerName(''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
     </header>
     <section className="home-content" id="top">
       <div className="home-intro">

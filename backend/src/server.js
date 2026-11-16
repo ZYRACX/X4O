@@ -12,6 +12,7 @@ const SUPABASE_SECRET = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_
 if (!SUPABASE_URL || !SUPABASE_SECRET) throw new Error('Set SUPABASE_URL and SUPABASE_SECRET_KEY before starting the backend.');
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET, { auth: { persistSession: false, autoRefreshToken: false } });
+const adminEmails = new Set((process.env.ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
 const normalizeOrigin = origin => origin.trim().replace(/\/+$/, '');
 const allowedOrigins = (process.env.WEB_ORIGIN || 'http://localhost:5173').split(',').map(value => normalizeOrigin(value)).filter(Boolean);
 const appOrigin = normalizeOrigin(process.env.APP_ORIGIN || allowedOrigins[0] || 'http://localhost:5173');
@@ -98,6 +99,20 @@ async function requireMatchmakingPlayer(req, res, next) {
     next();
   } catch (error) { next(error); }
 }
+async function requireAdmin(req, res, next) {
+  try {
+    const token = req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+    if (!token) return res.status(401).json({ error: 'Log in with an admin account.' });
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return res.status(401).json({ error: 'Your session is invalid. Log in again.' });
+    if (!adminEmails.has((data.user.email || '').toLowerCase())) return res.status(403).json({ error: 'Admin access is not enabled for this account.' });
+    req.adminUser = data.user;
+    next();
+  } catch (error) { next(error); }
+}
+function adminAccount(user, profile) {
+  return { id: user.id, email: user.email, username: profile?.username || user.user_metadata?.username || '', createdAt: user.created_at, lastSignInAt: user.last_sign_in_at, verified: !!user.email_confirmed_at, suspended: !!user.banned_until && new Date(user.banned_until) > new Date() };
+}
 const playerQueueState = id => matchmakingPlayers.get(id) || { state: 'idle' };
 function removeFromQueue(id) {
   for (const queue of Object.values(matchmakingQueues)) {
@@ -161,6 +176,60 @@ async function startMatchedGame(pair) {
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/admin/me', requireAdmin, (_req, res) => res.json({ admin: true }));
+app.get('/api/admin/accounts', requireAdmin, async (req, res, next) => {
+  try {
+    let page = 1, users = [];
+    while (true) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+      if (error) throw error;
+      users = users.concat(data.users);
+      if (data.users.length < 100) break;
+      page++;
+    }
+    const ids = users.map(user => user.id);
+    const { data: profiles, error: profileError } = ids.length ? await supabase.from('player_profiles').select('id,username,created_at').in('id', ids) : { data: [], error: null };
+    if (profileError) throw profileError;
+    const profileById = new Map((profiles || []).map(profile => [profile.id, profile]));
+    res.json({ accounts: users.map(user => adminAccount(user, profileById.get(user.id))), total: users.length });
+  } catch (error) { next(error); }
+});
+app.patch('/api/admin/accounts/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters using letters, numbers, or underscores.' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+    const { data: oldProfile, error: lookupError } = await supabase.from('player_profiles').select('id,username').eq('id', id).maybeSingle();
+    if (lookupError) throw lookupError;
+    if (!oldProfile) return res.status(404).json({ error: 'Account profile not found.' });
+    const { data: profile, error: profileError } = await supabase.from('player_profiles').update({ username }).eq('id', id).select('id,username').maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile) return res.status(404).json({ error: 'Account profile not found.' });
+    const { data, error } = await supabase.auth.admin.updateUserById(id, { email, user_metadata: { username } });
+    if (error) { await supabase.from('player_profiles').update({ username: oldProfile.username }).eq('id', id); throw error; }
+    res.json({ account: adminAccount(data.user, profile) });
+  } catch (error) { next(error); }
+});
+app.post('/api/admin/accounts/:id/suspend', requireAdmin, async (req, res, next) => {
+  try {
+    if (req.params.id === req.adminUser.id) return res.status(400).json({ error: 'You cannot suspend your own admin account.' });
+    const suspend = req.body?.suspended === true;
+    const { data, error } = await supabase.auth.admin.updateUserById(req.params.id, { ban_duration: suspend ? '876000h' : 'none' });
+    if (error) throw error;
+    const { data: profile } = await supabase.from('player_profiles').select('id,username').eq('id', req.params.id).maybeSingle();
+    res.json({ account: adminAccount(data.user, profile) });
+  } catch (error) { next(error); }
+});
+app.delete('/api/admin/accounts/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (req.params.id === req.adminUser.id) return res.status(400).json({ error: 'You cannot delete your own admin account.' });
+    const { error } = await supabase.auth.admin.deleteUser(req.params.id);
+    if (error) throw error;
+    res.json({ deleted: true, id: req.params.id });
+  } catch (error) { next(error); }
+});
 app.post('/api/auth/register', async (req, res, next) => {
   try {
     const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
