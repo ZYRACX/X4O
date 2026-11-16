@@ -40,6 +40,9 @@ const newToken = () => crypto.randomBytes(32).toString('base64url');
 const newCode = () => crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
 const cleanName = value => typeof value === 'string' ? value.trim().replace(/[<>\u0000-\u001f]/g, '').slice(0, 24) : '';
 const roomSelect = 'id,code,visibility,status,creator_name,player1_name,player2_name,board,scores,turn,last_move,winning_cells,created_at,expires_at,player1_token_hash,player2_token_hash';
+const matchmakingQueue = [];
+const matchmakingPlayers = new Map();
+const matchmakingPairs = new Map();
 
 async function getRoom(id) {
   const { data, error } = await supabase.from('game_rooms').select(roomSelect).eq('id', id).maybeSingle();
@@ -51,6 +54,77 @@ async function getSeat(room, token) {
   if (room.player1_token_hash === digest) return 'X';
   if (room.player2_token_hash === digest) return 'O';
   return null;
+}
+async function requireVerifiedPlayer(req, res, next) {
+  try {
+    const token = req.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+    if (!token) return res.status(401).json({ error: 'Log in with a verified account to use matchmaking.' });
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user?.email_confirmed_at) return res.status(403).json({ error: 'Verify your account email before using matchmaking.' });
+    const { data: profile, error: profileError } = await supabase.from('player_profiles').select('username').eq('id', data.user.id).maybeSingle();
+    if (profileError) throw profileError;
+    if (!profile?.username) return res.status(403).json({ error: 'Your player profile is not ready for matchmaking.' });
+    req.matchmakingPlayer = { id: data.user.id, username: profile.username };
+    next();
+  } catch (error) { next(error); }
+}
+const playerQueueState = id => matchmakingPlayers.get(id) || { state: 'idle' };
+function removeFromQueue(id) {
+  const index = matchmakingQueue.findIndex(player => player.id === id);
+  if (index >= 0) matchmakingQueue.splice(index, 1);
+}
+function publicQueueState(id) {
+  const state = playerQueueState(id);
+  if (state.state === 'pairing') {
+    const pair = matchmakingPairs.get(state.pairId);
+    return { state: 'ready', deadline: pair?.deadline, ready: pair?.ready.has(id) || false, opponent: pair?.players.find(player => player.id !== id)?.username || 'Opponent' };
+  }
+  if (state.state === 'matched') return { state: 'matched', match: state.match };
+  return { state: state.state };
+}
+function pairQueuedPlayers() {
+  while (matchmakingQueue.length >= 2) {
+    const players = [matchmakingQueue.shift(), matchmakingQueue.shift()];
+    const pairId = crypto.randomUUID();
+    const pair = { id: pairId, players, ready: new Set(), deadline: Date.now() + 10_000, status: 'ready', timer: null };
+    matchmakingPairs.set(pairId, pair);
+    players.forEach(player => matchmakingPlayers.set(player.id, { state: 'pairing', pairId }));
+    pair.timer = setTimeout(() => {
+      if (pair.status !== 'ready') return;
+      pair.status = 'expired';
+      for (const player of players) {
+        if (pair.ready.has(player.id)) {
+          matchmakingQueue.unshift(player);
+          matchmakingPlayers.set(player.id, { state: 'waiting' });
+        } else matchmakingPlayers.delete(player.id);
+      }
+      matchmakingPairs.delete(pair.id);
+      pairQueuedPlayers();
+    }, 10_000);
+  }
+}
+async function startMatchedGame(pair) {
+  pair.status = 'creating';
+  clearTimeout(pair.timer);
+  const [first, second] = pair.players;
+  const firstToken = newToken(), secondToken = newToken();
+  const game = {
+    code: newCode(), visibility: 'private', status: 'playing', creator_name: first.username,
+    player1_name: first.username, player2_name: second.username,
+    player1_token_hash: hashToken(firstToken), player2_token_hash: hashToken(secondToken),
+    board: Array(100).fill(null), scores: { X: 0, O: 0 }, turn: 'X', winning_cells: [], expires_at: null,
+  };
+  const { data, error } = await supabase.from('game_rooms').insert(game).select(roomSelect).single();
+  if (error) {
+    pair.status = 'error';
+    pair.players.forEach(player => matchmakingPlayers.delete(player.id));
+    matchmakingPairs.delete(pair.id);
+    throw error;
+  }
+  const match = { room: safeRoom(data) };
+  matchmakingPlayers.set(first.id, { state: 'matched', match: { ...match, seat: 'X', playerToken: firstToken } });
+  matchmakingPlayers.set(second.id, { state: 'matched', match: { ...match, seat: 'O', playerToken: secondToken } });
+  pair.status = 'matched';
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -64,7 +138,7 @@ app.post('/api/auth/register', async (req, res, next) => {
     if (typeof password !== 'string' || password.length < 8 || password.length > 72) return res.status(400).json({ error: 'Password must be between 8 and 72 characters.' });
     const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username }, emailRedirectTo: appOrigin } });
     if (error) return res.status(400).json({ error: error.message });
-    res.status(201).json({ user: { id: data.user.id, email: data.user.email, username }, session: data.session, confirmationRequired: !data.session });
+    res.status(201).json({ user: { id: data.user.id, email: data.user.email, username, verified: !!data.user.email_confirmed_at }, session: data.session, confirmationRequired: !data.session });
   } catch (error) { next(error); }
 });
 app.post('/api/auth/confirm', async (req, res, next) => {
@@ -74,7 +148,7 @@ app.post('/api/auth/confirm', async (req, res, next) => {
     if (typeof access_token !== 'string' || typeof refresh_token !== 'string') return res.status(400).json({ error: 'Confirmation link is missing its session tokens.' });
     const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
     if (error) return res.status(401).json({ error: 'That confirmation link is invalid or expired. Request a new one and try again.' });
-    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '' }, session: data.session });
+    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '', verified: !!data.user.email_confirmed_at }, session: data.session });
   } catch (error) { next(error); }
 });
 app.post('/api/auth/login', async (req, res, next) => {
@@ -84,8 +158,50 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (!email || typeof password !== 'string') return res.status(400).json({ error: 'Enter your email and password.' });
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return res.status(401).json({ error: error.message });
-    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '' }, session: data.session });
+    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '', verified: !!data.user.email_confirmed_at }, session: data.session });
   } catch (error) { next(error); }
+});
+app.post('/api/matchmaking/queue', requireVerifiedPlayer, (req, res) => {
+  const player = req.matchmakingPlayer;
+  const state = playerQueueState(player.id);
+  if (state.state === 'matched') return res.json(publicQueueState(player.id));
+  if (state.state !== 'waiting' && state.state !== 'pairing') {
+    matchmakingQueue.push({ ...player, joinedAt: Date.now() });
+    matchmakingPlayers.set(player.id, { state: 'waiting' });
+    pairQueuedPlayers();
+  }
+  res.status(202).json(publicQueueState(player.id));
+});
+app.get('/api/matchmaking/status', requireVerifiedPlayer, (req, res) => res.json(publicQueueState(req.matchmakingPlayer.id)));
+app.post('/api/matchmaking/ready', requireVerifiedPlayer, async (req, res, next) => {
+  try {
+    const playerId = req.matchmakingPlayer.id;
+    const state = playerQueueState(playerId);
+    if (state.state !== 'pairing') return res.status(409).json({ error: 'This ready check expired. Join the queue again.' });
+    const pair = matchmakingPairs.get(state.pairId);
+    if (!pair || pair.status !== 'ready' || Date.now() > pair.deadline) return res.status(409).json({ error: 'This ready check expired. Join the queue again.' });
+    pair.ready.add(playerId);
+    if (pair.ready.size === 2) await startMatchedGame(pair);
+    res.json(publicQueueState(playerId));
+  } catch (error) { next(error); }
+});
+app.post('/api/matchmaking/cancel', requireVerifiedPlayer, (req, res) => {
+  const playerId = req.matchmakingPlayer.id;
+  const state = playerQueueState(playerId);
+  if (state.state === 'waiting') removeFromQueue(playerId);
+  if (state.state === 'pairing') {
+    const pair = matchmakingPairs.get(state.pairId);
+    if (pair?.status === 'ready') {
+      pair.status = 'cancelled'; clearTimeout(pair.timer); matchmakingPairs.delete(pair.id);
+      const opponent = pair.players.find(player => player.id !== playerId);
+      if (opponent && pair.ready.has(opponent.id)) {
+        matchmakingQueue.unshift(opponent); matchmakingPlayers.set(opponent.id, { state: 'waiting' });
+      } else if (opponent) matchmakingPlayers.delete(opponent.id);
+      pairQueuedPlayers();
+    }
+  }
+  if (state.state !== 'matched') matchmakingPlayers.delete(playerId);
+  res.json({ state: 'idle' });
 });
 app.get('/api/rooms', async (_req, res, next) => {
   try {
