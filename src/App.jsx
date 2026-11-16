@@ -31,6 +31,15 @@ async function readApiResponse(response) {
   return data;
 }
 
+function matchmakingAuthHeaders() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
+    if (saved?.session?.access_token) return { Authorization: `Bearer ${saved.session.access_token}` };
+    if (saved?.queueTicket) return { 'X-Queue-Ticket': saved.queueTicket };
+  } catch { /* A missing local account simply means the player needs to log in. */ }
+  return {};
+}
+
 function scoreMove(board, index, mark) {
   const row = Math.floor(index / SIZE), col = index % SIZE;
   const lines = [];
@@ -167,12 +176,11 @@ function App() {
   }, [sound]);
 
   useEffect(() => {
-    if (screen !== 'matchmaking' || !account?.verified) return;
+    if (screen !== 'matchmaking' || !account || (!account.verified && !account.queueTicket)) return;
     let alive = true;
     const updateStatus = async () => {
       try {
-        const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
-        const response = await fetch(`${API_BASE}/api/matchmaking/status`, { headers: { Authorization: `Bearer ${saved?.session?.access_token || ''}` } });
+        const response = await fetch(`${API_BASE}/api/matchmaking/status`, { headers: matchmakingAuthHeaders() });
         const data = await readApiResponse(response);
         if (!alive) return;
         setQueueError(''); setQueueState(data);
@@ -319,26 +327,25 @@ function App() {
   };
 
   const startMatchmaking = async () => {
-    setQueueError(''); setQueueStartedAt(Date.now()); setQueueClock(Date.now()); setQueueState({ state: 'waiting' }); lastQueueState.current = 'waiting'; setScreen('matchmaking');
+    setQueueError(''); setQueueStartedAt(Date.now()); setQueueClock(Date.now()); setQueueState({ state: 'waiting', queue: account?.verified ? 'verified' : 'unverified' }); lastQueueState.current = 'waiting'; setScreen('matchmaking');
     try {
-      const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
-      const response = await fetch(`${API_BASE}/api/matchmaking/queue`, { method: 'POST', headers: { Authorization: `Bearer ${saved?.session?.access_token || ''}` } });
-      const data = await readApiResponse(response); setQueueState(data); lastQueueState.current = data.state;
+      const response = await fetch(`${API_BASE}/api/matchmaking/queue`, { method: 'POST', headers: matchmakingAuthHeaders() });
+      const data = await readApiResponse(response);
+      if (data.state === 'ready' && lastQueueState.current !== 'ready') playTone('win');
+      setQueueState(data); lastQueueState.current = data.state;
       if (data.state === 'matched') acceptOnlineSession(data.match);
     } catch (error) { setQueueError(error.message); }
   };
   const acceptMatch = async () => {
     try {
-      const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
-      const response = await fetch(`${API_BASE}/api/matchmaking/ready`, { method: 'POST', headers: { Authorization: `Bearer ${saved?.session?.access_token || ''}` } });
+      const response = await fetch(`${API_BASE}/api/matchmaking/ready`, { method: 'POST', headers: matchmakingAuthHeaders() });
       const data = await readApiResponse(response); setQueueState(data); lastQueueState.current = data.state;
       if (data.state === 'matched') acceptOnlineSession(data.match);
     } catch (error) { setQueueError(error.message); }
   };
   const leaveMatchmaking = async () => {
     try {
-      const saved = JSON.parse(localStorage.getItem('fourfold-account') || 'null');
-      await fetch(`${API_BASE}/api/matchmaking/cancel`, { method: 'POST', headers: { Authorization: `Bearer ${saved?.session?.access_token || ''}` } });
+      await fetch(`${API_BASE}/api/matchmaking/cancel`, { method: 'POST', headers: matchmakingAuthHeaders() });
     } finally { setQueueState({ state: 'idle' }); lastQueueState.current = 'idle'; setScreen('home'); }
   };
 
@@ -357,6 +364,10 @@ function App() {
       if (data.session) {
         const saved = { user: data.user, session: data.session };
         localStorage.setItem('fourfold-account', JSON.stringify(saved)); setAccount(data.user); setPlayerName(data.user.username); setAccountOpen(false);
+      } else if (data.queueTicket) {
+        localStorage.setItem('fourfold-account', JSON.stringify({ user: data.user, queueTicket: data.queueTicket }));
+        setAccount(data.user); setPlayerName(data.user.username);
+        setAccountNotice('Check your email to confirm your account. You can queue now in the unverified player pool.');
       } else setAccountNotice('Check your email to confirm your account, then log in.');
     } catch (error) { setAccountError(error.message); }
     finally { setAccountBusy(false); }
@@ -365,11 +376,11 @@ function App() {
   if (screen === 'matchmaking') return <main className="app-shell home-shell matchmaking-shell">
     <header className="topbar"><a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a><button className="home-button" onClick={leaveMatchmaking}>← Cancel queue</button></header>
     <section className="matchmaking-content" aria-live="polite">
-      <div className="eyebrow"><span className={queueState.state === 'ready' ? 'connected-dot' : 'live-dot'} /> RANDOM 1V1 MATCHMAKING</div>
+      <div className="eyebrow"><span className={queueState.state === 'ready' ? 'connected-dot' : 'live-dot'} /> {queueState.queue === 'unverified' ? 'UNVERIFIED' : 'VERIFIED'} RANDOM 1V1 QUEUE</div>
       {queueState.state === 'ready' ? <><div className="queue-orbit ready-orbit"><span>×</span><i>VS</i><span>○</span></div><h1>Opponent found.</h1><p className="matchmaking-copy">{queueState.opponent} is ready to play. Accept before the timer runs out.</p><div className="queue-timer ready-timer">00:{String(readySeconds).padStart(2, '0')}</div><button className="start-button ready-button" onClick={acceptMatch}>I’m ready <span>→</span></button>{queueState.ready && <p className="queue-note">You’re ready. Waiting for the other player…</p>}</> : queueState.state === 'idle' ? <><div className="queue-orbit"><span>×</span><i>?</i><span>○</span></div><h1>Queue ended.</h1><p className="matchmaking-copy">You missed the ready check and were removed. Start again to find another match.</p><button className="start-button" onClick={startMatchmaking}>Queue again <span>→</span></button></> : queueState.state === 'matched' ? <><h1>Match found.</h1><p className="matchmaking-copy">Connecting you to your game…</p></> : <><div className="queue-orbit"><span>×</span><i>···</i><span>○</span></div><h1>Finding your match.</h1><p className="matchmaking-copy">You’re in line. We’ll pair you with the next available player.</p><div className="queue-timer">{String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')}</div><p className="queue-note">Searching for an opponent</p></>}
       {queueError && <p className="account-error" role="alert">{queueError}</p>}
     </section>
-    <footer><span>X4O <i>·</i> RANDOM 1V1</span><span>FIRST COME. FIRST SERVED.</span></footer>
+    <footer><span>X4O <i>·</i> {queueState.queue === 'unverified' ? 'UNVERIFIED' : 'VERIFIED'} QUEUE</span><span>FIRST COME. FIRST SERVED.</span></footer>
   </main>;
 
   if (screen === 'home') return <main className="app-shell home-shell">
@@ -401,7 +412,7 @@ function App() {
         </button>
       </div>
       {mode === 'online' ? <section className="online-lobby" aria-label="Online multiplayer lobby">
-        <div className="matchmaking-panel"><div><strong>Random 1v1</strong><small>Join the first-come, first-served queue.</small></div>{account?.verified ? <button className="start-button" onClick={startMatchmaking}>Find a match <span>→</span></button> : <button className="secondary-action" onClick={() => { setAccountMode('login'); setAccountOpen(true); }} disabled={!!account}>{account ? 'Verify your email' : 'Log in to unlock'}</button>}</div>
+        <div className="matchmaking-panel"><div><strong>Random 1v1</strong><small>Verified and unverified accounts have separate queues.</small></div>{account?.verified || account?.queueTicket ? <button className="start-button" onClick={startMatchmaking}>Find a match <span>→</span></button> : <button className="secondary-action" onClick={() => { setAccountMode('login'); setAccountOpen(true); }}>Log in to unlock</button>}</div>
         <label className="name-field">YOUR DISPLAY NAME<input value={account?.username || playerName} maxLength={24} onChange={e => setPlayerName(e.target.value)} placeholder="Enter your name" autoComplete="nickname" readOnly={!!account} aria-readonly={!!account} /></label>
         <div className="create-room-panel"><div><strong>Create a room</strong><small>Choose whether your room appears in the public list.</small></div><div className="create-room-controls"><select aria-label="Room visibility" value={roomVisibility} onChange={e => setRoomVisibility(e.target.value)}><option value="private">Private</option><option value="public">Public</option></select><button className="start-button" disabled={!displayName || lobbyLoading} onClick={createOnlineRoom}>Create {roomVisibility} room <span>→</span></button></div></div>
         <form className="join-room-form" onSubmit={e => { e.preventDefault(); joinOnlineRoom(joinCode); }}><label className="name-field">JOIN WITH A ROOM CODE<input value={joinCode} maxLength={6} onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, ''))} placeholder="6 character code" /></label><button className="secondary-action" disabled={!displayName || joinCode.length !== 6 || lobbyLoading}>Join room</button></form>
