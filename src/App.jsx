@@ -296,6 +296,23 @@ function App() {
     setMode(nextMode);
   };
 
+  const leaveOnlineGame = async () => {
+    if (mode === 'online' && status === 'playing' && onlineRoom?.id && onlineToken) {
+      try {
+        await fetch(`${API_BASE}/api/rooms/${onlineRoom.id}/leave`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerToken: onlineToken }),
+        });
+      } catch { /* Socket disconnect grace will record the forfeit if the request cannot reach the server. */ }
+    }
+    restart();
+    if (mode === 'online') {
+      socketRef.current?.disconnect(); setOnlineRoom(null); setOnlineSeat(null); setOnlineToken(null);
+      localStorage.removeItem(ONLINE_SESSION_KEY);
+    }
+    setScreen('home');
+  };
+
   const loadPublicRooms = async () => {
     setLobbyLoading(true);
     try {
@@ -438,7 +455,7 @@ function App() {
         {mode === 'online' && <div className="online-game-badge"><span className={connectionState === 'Connected' ? 'connected-dot' : 'disconnected-dot'} />{connectionState || 'Connecting'} <b>{onlineRoom?.code}</b><button onClick={async () => { try { await navigator.clipboard.writeText(onlineRoom.code); setOnlineMessage('Room code copied.'); } catch { setOnlineMessage(`Share room code ${onlineRoom.code} with your opponent.`); } }} aria-label="Copy room code">Copy</button></div>}
         <button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button>
         {mode !== 'online' && <button className="restart-top" onClick={restart}><span>↻</span><span className="restart-label">New game</span></button>}
-        <button className="home-button" onClick={() => { restart(); if (mode === 'online') { socketRef.current?.disconnect(); setOnlineRoom(null); setOnlineSeat(null); setOnlineToken(null); localStorage.removeItem(ONLINE_SESSION_KEY); } setScreen('home'); }}>← <span>Home</span></button>
+        <button className="home-button" onClick={leaveOnlineGame}>← <span>{mode === 'online' && status === 'playing' ? 'Leave match' : 'Home'}</span></button>
       </div>
     </header>
 
@@ -460,7 +477,7 @@ function App() {
         </div>
         <div className="progress-row"><span>BOARD PROGRESS</span><span>{filled} <i>/ 100</i></span></div>
         <div className="progress-track"><span style={{ width: `${filled}%` }} /></div>
-        {status === 'finished' ? <div className="result-card"><span className="result-icon">✦</span><div><strong>{mode === 'online' ? (scores.X === scores.O ? 'It’s a draw' : `${scores.X > scores.O ? onlineRoom?.player1Name : onlineRoom?.player2Name} wins!`) : mode === 'PvP' && winner !== 'It’s a draw' ? `${winner === 'You win!' ? 'Player 1' : 'Player 2'} wins!` : winner}</strong><small>Final score · {scores.X} — {scores.O}</small></div></div> : <div className="tip-card"><span className="tip-icon">✳</span><p>{mode === 'online' ? status === 'waiting' ? `Room ${onlineRoom?.visibility}. Share code ${onlineRoom?.code} and wait for an opponent.` : onlineMessage || (connectionState !== 'Connected' ? 'Connecting to your opponent…' : turn === onlineSeat ? 'Your turn. Choose an empty cell.' : `${turn === 'X' ? onlineRoom?.player1Name : onlineRoom?.player2Name} is thinking…`) : thinking ? 'Bot is weighing its next move…' : turn === 'X' ? mode === 'PvP' ? 'Player 1’s turn. Place a mark to begin.' : 'Your move. Find a line—or set up the next one.' : mode === 'PvP' ? 'Player 2’s turn. Find a way to score.' : 'Look for chances to create two scoring directions.'}</p></div>}
+        {status === 'finished' ? <div className="result-card"><span className="result-icon">✦</span><div><strong>{mode === 'online' ? onlineRoom?.winnerSeat ? `${onlineRoom.winnerSeat === 'X' ? onlineRoom.player1Name : onlineRoom.player2Name} wins!` : scores.X === scores.O ? 'It’s a draw' : `${scores.X > scores.O ? onlineRoom?.player1Name : onlineRoom?.player2Name} wins!` : mode === 'PvP' && winner !== 'It’s a draw' ? `${winner === 'You win!' ? 'Player 1' : 'Player 2'} wins!` : winner}</strong><small>{mode === 'online' && onlineRoom?.winnerSeat ? `${onlineRoom.winnerSeat === onlineSeat ? 'Opponent left the match' : 'You left the match'} · ` : ''}Final score · {scores.X} — {scores.O}</small></div></div> : <div className="tip-card"><span className="tip-icon">✳</span><p>{mode === 'online' ? status === 'waiting' ? `Room ${onlineRoom?.visibility}. Share code ${onlineRoom?.code} and wait for an opponent.` : onlineMessage || (connectionState !== 'Connected' ? 'Connecting to your opponent…' : turn === onlineSeat ? 'Your turn. Choose an empty cell.' : `${turn === 'X' ? onlineRoom?.player1Name : onlineRoom?.player2Name} is thinking…`) : thinking ? 'Bot is weighing its next move…' : turn === 'X' ? mode === 'PvP' ? 'Player 1’s turn. Place a mark to begin.' : 'Your move. Find a line—or set up the next one.' : mode === 'PvP' ? 'Player 2’s turn. Find a way to score.' : 'Look for chances to create two scoring directions.'}</p></div>}
         <div className="how-to"><span className="how-icon">?</span><div><strong>HOW TO PLAY</strong><p>Place a mark to complete four connected cells in any direction. Each direction scores one point.</p></div></div>
       </div>
 

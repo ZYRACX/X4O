@@ -40,12 +40,15 @@ create table if not exists public.game_rooms (
   board jsonb not null default jsonb_build_array(),
   scores jsonb not null default '{"X":0,"O":0}'::jsonb,
   turn text not null default 'X' check (turn in ('X', 'O')),
+  winner_seat text check (winner_seat is null or winner_seat in ('X', 'O')),
   last_move integer check (last_move is null or last_move between 0 and 99),
   winning_cells jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   expires_at timestamptz default (now() + interval '24 hours')
 );
+
+alter table public.game_rooms add column if not exists winner_seat text;
 
 create index if not exists game_rooms_public_waiting_created
   on public.game_rooms (created_at desc)

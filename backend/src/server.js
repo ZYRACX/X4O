@@ -33,17 +33,20 @@ const safeRoom = room => ({
   id: room.id, code: room.code, visibility: room.visibility, status: room.status,
   creatorName: room.creator_name, player1Name: room.player1_name, player2Name: room.player2_name,
   board: room.board, scores: room.scores, turn: room.turn, lastMove: room.last_move,
-  winningCells: room.winning_cells || [], createdAt: room.created_at, expiresAt: room.expires_at,
+  winningCells: room.winning_cells || [], winnerSeat: room.winner_seat || null, createdAt: room.created_at, expiresAt: room.expires_at,
 });
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 const newCode = () => crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
 const cleanName = value => typeof value === 'string' ? value.trim().replace(/[<>\u0000-\u001f]/g, '').slice(0, 24) : '';
-const roomSelect = 'id,code,visibility,status,creator_name,player1_name,player2_name,board,scores,turn,last_move,winning_cells,created_at,expires_at,player1_token_hash,player2_token_hash';
+const roomSelect = 'id,code,visibility,status,creator_name,player1_name,player2_name,board,scores,turn,last_move,winning_cells,winner_seat,created_at,expires_at,player1_token_hash,player2_token_hash';
 const matchmakingQueues = { verified: [], unverified: [] };
 const matchmakingPlayers = new Map();
 const matchmakingPairs = new Map();
 const matchmakingTickets = new Map();
+const activeRoomConnections = new Map();
+const disconnectTimers = new Map();
+const disconnectGraceMs = 10_000;
 
 async function getRoom(id) {
   const { data, error } = await supabase.from('game_rooms').select(roomSelect).eq('id', id).maybeSingle();
@@ -55,6 +58,22 @@ async function getSeat(room, token) {
   if (room.player1_token_hash === digest) return 'X';
   if (room.player2_token_hash === digest) return 'O';
   return null;
+}
+const connectionKey = (roomId, seat) => `${roomId}:${seat}`;
+async function forfeitRoom(roomId, leavingSeat) {
+  const key = connectionKey(roomId, leavingSeat);
+  clearTimeout(disconnectTimers.get(key)); disconnectTimers.delete(key);
+  const room = await getRoom(roomId);
+  if (!room || room.status !== 'playing') return room;
+  const winnerSeat = leavingSeat === 'X' ? 'O' : 'X';
+  const { data, error } = await supabase.from('game_rooms').update({
+    status: 'finished', winner_seat: winnerSeat,
+    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), updated_at: new Date().toISOString(),
+  }).eq('id', roomId).eq('status', 'playing').select(roomSelect).maybeSingle();
+  if (error) throw error;
+  const finishedRoom = data || await getRoom(roomId);
+  if (data) io.to(roomId).emit('room:updated', { room: safeRoom(data) });
+  return finishedRoom;
 }
 async function requireMatchmakingPlayer(req, res, next) {
   try {
@@ -288,6 +307,18 @@ app.post('/api/rooms/:id/rejoin', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.post('/api/rooms/:id/leave', async (req, res, next) => {
+  try {
+    const token = req.body?.playerToken;
+    if (typeof token !== 'string' || token.length < 20) return res.status(401).json({ error: 'A valid player token is required.' });
+    const room = await getRoom(req.params.id);
+    const seat = room && await getSeat(room, token);
+    if (!room || !seat) return res.status(401).json({ error: 'That token is not a player in this room.' });
+    const finishedRoom = await forfeitRoom(room.id, seat);
+    res.json({ room: safeRoom(finishedRoom), forfeited: finishedRoom?.winner_seat === (seat === 'X' ? 'O' : 'X') });
+  } catch (error) { next(error); }
+});
+
 io.on('connection', socket => {
   socket.on('room:join', async ({ roomId, playerToken } = {}) => {
     try {
@@ -295,6 +326,10 @@ io.on('connection', socket => {
       if (!room) return socket.emit('room:error', { error: 'Room not found.' });
       const seat = await getSeat(room, playerToken);
       if (!seat) return socket.emit('room:error', { error: 'This device is not a player in this room.' });
+      const key = connectionKey(room.id, seat);
+      clearTimeout(disconnectTimers.get(key)); disconnectTimers.delete(key);
+      const connections = activeRoomConnections.get(key) || new Set();
+      connections.add(socket.id); activeRoomConnections.set(key, connections);
       socket.data.roomId = room.id; socket.data.seat = seat;
       await socket.join(room.id);
       socket.emit('room:state', { room: safeRoom(room), seat });
@@ -315,6 +350,23 @@ io.on('connection', socket => {
       if (!data) return socket.emit('room:error', { error: 'The board changed. Wait for the latest turn.' });
       io.to(roomId).emit('room:updated', { room: safeRoom(data) });
     } catch (error) { socket.emit('room:error', { error: error.message || 'Move could not be saved.' }); }
+  });
+
+  socket.on('disconnect', () => {
+    const { roomId, seat } = socket.data;
+    if (!roomId || !seat) return;
+    const key = connectionKey(roomId, seat);
+    const connections = activeRoomConnections.get(key);
+    connections?.delete(socket.id);
+    if (connections?.size) return;
+    activeRoomConnections.delete(key);
+    clearTimeout(disconnectTimers.get(key));
+    const timeout = setTimeout(() => {
+      disconnectTimers.delete(key);
+      if (activeRoomConnections.get(key)?.size) return;
+      forfeitRoom(roomId, seat).catch(error => console.error('Could not record disconnect forfeit:', error));
+    }, disconnectGraceMs);
+    disconnectTimers.set(key, timeout);
   });
 });
 

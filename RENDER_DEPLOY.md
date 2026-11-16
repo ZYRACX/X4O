@@ -2,7 +2,7 @@
 
 ## 1. Create the Supabase table
 
-Create a Supabase project, open **SQL Editor**, and run [`backend/supabase/schema.sql`](backend/supabase/schema.sql). If you already ran the previous version of the schema, run it again to add the username reservation table and Auth trigger.
+Create a Supabase project, open **SQL Editor**, and run [`backend/supabase/schema.sql`](backend/supabase/schema.sql). If you already ran an earlier version of the schema, run it again to add the username reservation table, Auth trigger, and online match winner field.
 
 In the Supabase project settings, copy the project URL and a **secret key** for server-side access. The key is a backend secret: never put it in a `VITE_` variable or commit it. The backend also accepts the legacy `service_role` key under `SUPABASE_SERVICE_ROLE_KEY`.
 
@@ -37,3 +37,5 @@ The room creator receives a six-character code and a private player token. Share
 Players can optionally create an account from the home screen. Supabase Auth stores the email and password, while the profile trigger reserves the chosen username (case-insensitively). Set Supabase **Authentication → URL Configuration → Site URL** to `https://x4-o.vercel.app`, and add that same URL to **Redirect URLs**. Configure the Render backend's `APP_ORIGIN` to `https://x4-o.vercel.app` as well. These settings send confirmation links back to the deployed game instead of a local development address. The game completes the confirmation and stores the returned Auth session locally; logging out clears that local session.
 
 Random 1v1 matchmaking has separate first-come-first-served queues for verified and unverified accounts; players never match across those queues. New unverified signups receive a short-lived, matchmaking-only ticket so they can queue before confirming their email, since Supabase does not issue a normal session while confirmation is pending. Each pair gets a 10-second ready check. Queue state and these temporary tickets are held in backend memory, so deploy one backend instance; a backend restart clears the current queue and outstanding unverified tickets.
+
+In an online match, selecting **Leave match** awards the win to the opponent. If a browser closes or loses its connection, the opponent wins after a 10-second reconnect grace period. The `winner_seat` column stores this result; re-run the schema script before deploying the backend change.
