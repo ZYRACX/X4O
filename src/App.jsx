@@ -106,6 +106,12 @@ function App() {
   const [mode, setMode] = useState('PvE');
   const [screen, setScreen] = useState('home');
   const [playerName, setPlayerName] = useState('');
+  const [account, setAccount] = useState(() => { try { return JSON.parse(localStorage.getItem('fourfold-account') || 'null')?.user || null; } catch { return null; } });
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountMode, setAccountMode] = useState('register');
+  const [accountError, setAccountError] = useState('');
+  const [accountNotice, setAccountNotice] = useState('');
+  const [accountBusy, setAccountBusy] = useState(false);
   const [roomVisibility, setRoomVisibility] = useState('private');
   const [joinCode, setJoinCode] = useState('');
   const [publicRooms, setPublicRooms] = useState([]);
@@ -274,11 +280,25 @@ function App() {
 
   const winner = scores.X === scores.O ? 'It’s a draw' : scores.X > scores.O ? 'You win!' : 'Bot wins';
   const filled = board.filter(Boolean).length;
+  const submitAccount = async event => {
+    event.preventDefault(); setAccountError(''); setAccountNotice(''); setAccountBusy(true);
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/${accountMode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await readApiResponse(response);
+      if (data.session) {
+        const saved = { user: data.user, session: data.session };
+        localStorage.setItem('fourfold-account', JSON.stringify(saved)); setAccount(data.user); setPlayerName(data.user.username); setAccountOpen(false);
+      } else setAccountNotice('Check your email to confirm your account, then log in.');
+    } catch (error) { setAccountError(error.message); }
+    finally { setAccountBusy(false); }
+  };
 
   if (screen === 'home') return <main className="app-shell home-shell">
     <header className="topbar">
       <a className="brand" href="#top" aria-label="Fourfold home"><span className="brand-mark">4</span><span>FOURFOLD</span></a>
-      <button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button>
+      <div className="account-actions">{account ? <><span className="account-greeting">{account.username}</span><button className="home-button" onClick={() => { localStorage.removeItem('fourfold-account'); setAccount(null); setPlayerName(''); }}>Log out</button></> : <button className="home-button" onClick={() => { setAccountMode('register'); setAccountOpen(true); }}>Account <span>· Log in</span></button>}<button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button></div>
     </header>
     <section className="home-content" id="top">
       <div className="home-intro">
@@ -318,6 +338,7 @@ function App() {
       <div className="home-rules"><span><b>4</b> in a row = 1 point</span><i>·</i><span>Most points wins</span><i>·</i><span>100 cells</span></div>
     </section>
     <footer><span>FOURFOLD <i>·</i> SCORE MODE</span><span>CHOOSE YOUR GAME</span></footer>
+    {accountOpen && <div className="account-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setAccountOpen(false); }}><section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title"><button className="account-close" onClick={() => setAccountOpen(false)} aria-label="Close">×</button><div className="eyebrow"><span className="live-dot" /> PLAYER ACCOUNT</div><h2 id="account-title">{accountMode === 'register' ? 'Reserve your name.' : 'Welcome back.'}</h2><p>{accountMode === 'register' ? 'Create an account to claim a username for online play.' : 'Log in with the email and password linked to your account.'}</p><form className="account-form" onSubmit={submitAccount}>{accountMode === 'register' && <label>USERNAME<input name="username" required minLength="3" maxLength="20" pattern="[A-Za-z0-9_]+" autoComplete="username" placeholder="Your player name" /></label>}<label>EMAIL<input type="email" name="email" required maxLength="254" autoComplete="email" placeholder="you@example.com" /></label><label>PASSWORD<input type="password" name="password" required minLength="8" maxLength="72" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} placeholder="At least 8 characters" /></label><button className="start-button" disabled={accountBusy}>{accountBusy ? 'Please wait…' : accountMode === 'register' ? 'Create account' : 'Log in'} <span>→</span></button></form>{accountError && <p className="account-error" role="alert">{accountError}</p>}{accountNotice && <p className="account-notice" role="status">{accountNotice}</p>}<button className="account-switch" onClick={() => { setAccountMode(accountMode === 'register' ? 'login' : 'register'); setAccountError(''); setAccountNotice(''); }}>{accountMode === 'register' ? 'Already registered? Log in' : 'New here? Create an account'}</button></section></div>}
   </main>;
 
   return <main className="app-shell">

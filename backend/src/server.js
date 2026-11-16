@@ -53,6 +53,29 @@ async function getSeat(room, token) {
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.post('/api/auth/register', async (req, res, next) => {
+  try {
+    const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = req.body?.password;
+    if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return res.status(400).json({ error: 'Username must be 3–20 characters using letters, numbers, or underscores.' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (typeof password !== 'string' || password.length < 8 || password.length > 72) return res.status(400).json({ error: 'Password must be between 8 and 72 characters.' });
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username } } });
+    if (error) return res.status(400).json({ error: error.message });
+    res.status(201).json({ user: { id: data.user.id, email: data.user.email, username }, session: data.session, confirmationRequired: !data.session });
+  } catch (error) { next(error); }
+});
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = req.body?.password;
+    if (!email || typeof password !== 'string') return res.status(400).json({ error: 'Enter your email and password.' });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return res.status(401).json({ error: error.message });
+    res.json({ user: { id: data.user.id, email: data.user.email, username: data.user.user_metadata?.username || '' }, session: data.session });
+  } catch (error) { next(error); }
+});
 app.get('/api/rooms', async (_req, res, next) => {
   try {
     const { data, error } = await supabase.from('game_rooms')

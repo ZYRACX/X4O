@@ -1,5 +1,32 @@
 create extension if not exists pgcrypto;
 
+-- One profile is created with each Supabase Auth user. A unique lowercase key
+-- reserves usernames without regard to capitalization.
+create table if not exists public.player_profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text not null check (username ~ '^[A-Za-z0-9_]{3,20}$'),
+  username_key text generated always as (lower(username)) stored unique,
+  created_at timestamptz not null default now()
+);
+
+create or replace function public.create_player_profile()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.player_profiles (id, username)
+  values (new.id, new.raw_user_meta_data ->> 'username');
+  return new;
+exception when unique_violation then
+  raise exception 'That username is already reserved.';
+end;
+$$;
+
+drop trigger if exists on_auth_user_created_profile on auth.users;
+create trigger on_auth_user_created_profile after insert on auth.users
+for each row execute function public.create_player_profile();
+
+alter table public.player_profiles enable row level security;
+grant all on public.player_profiles to service_role;
+
 create table if not exists public.game_rooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique check (code ~ '^[A-F0-9]{6}$'),
