@@ -43,8 +43,17 @@ function matchmakingAuthHeaders() {
 
 function guestPresenceId() {
   const key = 'fourfold-presence-id';
-  let id = localStorage.getItem(key);
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem(key, id); }
+  let id = '';
+  try { id = localStorage.getItem(key) || ''; } catch { /* Storage may be unavailable in private browsing. */ }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    id = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+        const value = Math.random() * 16 | 0;
+        return (char === 'x' ? value : (value & 3 | 8)).toString(16);
+      });
+    try { localStorage.setItem(key, id); } catch { /* The generated ID still works for this heartbeat. */ }
+  }
   return id;
 }
 
@@ -190,10 +199,12 @@ function App() {
     let alive = true;
     const refreshStats = async () => {
       try {
-        await fetch(`${API_BASE}/api/presence`, {
-          method: 'POST', headers: { ...matchmakingAuthHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ guestId: guestPresenceId() }),
-        });
+        try {
+          await fetch(`${API_BASE}/api/presence`, {
+            method: 'POST', headers: { ...matchmakingAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guestId: guestPresenceId() }),
+          });
+        } catch { /* Presence is only used for counts; stats and gameplay can continue without it. */ }
         const response = await fetch(`${API_BASE}/api/stats`);
         const data = await readApiResponse(response);
         if (alive) setLiveStats(data);
