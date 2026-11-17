@@ -207,16 +207,14 @@ app.post('/api/presence', async (req, res, next) => {
 app.get('/api/stats', async (_req, res, next) => {
   try {
     const activeSince = new Date(Date.now() - activePresenceMs).toISOString();
-    const [profiles, activeAccounts, activeGuests] = await Promise.all([
+    const [profiles, activePlayers] = await Promise.all([
       supabase.from('player_profiles').select('id', { count: 'exact', head: true }),
-      supabase.from('player_presence').select('id', { count: 'exact', head: true }).not('account_id', 'is', null).gt('last_seen', activeSince),
-      supabase.from('player_presence').select('id', { count: 'exact', head: true }).not('guest_id', 'is', null).gt('last_seen', activeSince),
+      supabase.from('player_presence').select('id', { count: 'exact', head: true }).gt('last_seen', activeSince),
     ]);
-    for (const result of [profiles, activeAccounts, activeGuests]) if (result.error) throw result.error;
+    for (const result of [profiles, activePlayers]) if (result.error) throw result.error;
     res.json({
       totalPlayers: profiles.count || 0,
-      activeAccounts: activeAccounts.count || 0,
-      guestPlayers: activeGuests.count || 0,
+      activePlayers: activePlayers.count || 0,
     });
   } catch (error) { next(error); }
 });

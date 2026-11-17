@@ -544,7 +544,7 @@ function App() {
       </div>
       <div className="home-live-stats" aria-live="polite">
         <div><span>TOTAL PLAYERS</span><strong>{liveStats?.totalPlayers ?? '—'}</strong></div>
-        <div><span>CONCURRENT PLAYERS</span><strong>{liveStats ? <>{liveStats.activeAccounts} <i>+</i> {liveStats.guestPlayers}</> : '—'}</strong></div>
+        <div><span>ACTIVE PLAYERS ON THE WEBSITE</span><strong>{liveStats?.activePlayers ?? '—'}</strong></div>
       </div>
       {mode === 'online' ? <section className="online-lobby" aria-label="Online multiplayer lobby">
         <div className="matchmaking-panel"><div><strong>Random 1v1</strong><small>Verified and unverified accounts have separate queues.</small></div>{account?.verified || account?.queueTicket ? <button className="start-button" onClick={startMatchmaking}>Find a match <span>→</span></button> : <button className="secondary-action" onClick={() => { setAccountMode('login'); setAccountOpen(true); }}>Log in to unlock</button>}</div>
