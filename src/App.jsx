@@ -128,11 +128,10 @@ function AdminPanel({ onBack }) {
   </main>;
 }
 
-function chooseBotMove(board) {
+function scoreBotMoves(board) {
   const available = board.map((v, i) => v === null ? i : -1).filter(i => i >= 0);
-  if (available.length === SIZE * SIZE) return 44;
-  let best = -Infinity, choices = [];
-  for (const i of available) {
+  if (available.length === SIZE * SIZE) return [{ index: 44, ownScore: 0, blockScore: 0, score: 0 }];
+  return available.map(i => {
     const after = [...board]; after[i] = 'O';
     const ownScore = scoreMove(after, i, 'O').length;
     const blockBoard = [...board]; blockBoard[i] = 'X';
@@ -149,10 +148,27 @@ function chooseBotMove(board) {
     }, 0);
     const center = 9 - (Math.abs(row - 4.5) + Math.abs(col - 4.5));
     const score = ownScore * 100000 + blockScore * 80000 + ownPotential * 1.1 + blockPotential * 0.95 + nearby * 0.8 + center * 0.12 + Math.random() * 0.2;
-    if (score > best) { best = score; choices = [i]; }
-    else if (score === best) choices.push(i);
+    return { index: i, ownScore, blockScore, score };
+  });
+}
+
+function chooseBotMove(board, difficulty) {
+  const candidates = scoreBotMoves(board);
+  const highestRated = moves => moves.reduce((best, move) => move.score > best.score ? move : best).index;
+
+  if (difficulty === 'Medium') {
+    // Medium still scores immediate points, but sometimes overlooks a direct block
+    // so the player gets an opening to complete their line on the next turn.
+    const canScore = candidates.some(move => move.ownScore > 0);
+    const canBlock = candidates.some(move => move.blockScore > 0);
+    if (!canScore && canBlock && Math.random() < 0.25) {
+      const nonBlockingMoves = candidates.filter(move => move.blockScore === 0);
+      if (nonBlockingMoves.length) return highestRated(nonBlockingMoves);
+    }
   }
-  return choices[Math.floor(Math.random() * choices.length)];
+
+  // Hard uses the full greedy score: immediate scoring, blocking, and line setup.
+  return highestRated(candidates);
 }
 
 function App() {
@@ -299,7 +315,7 @@ function App() {
     timer.current = window.setTimeout(() => {
       const index = difficulty === 'Easy'
         ? board.map((v, i) => v === null ? i : -1).filter(i => i >= 0)[Math.floor(Math.random() * board.filter(v => v === null).length)]
-        : chooseBotMove(board);
+        : chooseBotMove(board, difficulty);
       if (index !== undefined) makeMove(index, 'O');
       setThinking(false);
     }, 460);
@@ -540,7 +556,7 @@ function App() {
         </div>
         {onlineMessage && <p className="online-message" role="alert">{onlineMessage}</p>}
       </section> : <div className="home-actions">
-        {mode === 'PvE' && <label className="difficulty home-difficulty"><span>BOT LEVEL</span><select value={difficulty} onChange={e => setDifficulty(e.target.value)}><option>Easy</option><option>Medium</option></select></label>}
+        {mode === 'PvE' && <label className="difficulty home-difficulty"><span>BOT LEVEL</span><select value={difficulty} onChange={e => setDifficulty(e.target.value)}><option>Easy</option><option>Medium</option><option>Hard</option></select></label>}
         <button className="start-button" onClick={() => setScreen('game')}>Start {mode === 'PvP' ? 'PvP' : 'PvE'} game <span>→</span></button>
       </div>}
       <div className="home-rules"><span><b>4</b> in a row = 1 point</span><i>·</i><span>Most points wins</span><i>·</i><span>100 cells</span></div>
@@ -553,7 +569,7 @@ function App() {
     <header className="topbar">
       <a className="brand" href="#top" aria-label="X4O home"><span className="brand-mark">X4O</span><span>X4O</span></a>
       <div className="top-actions">
-        {mode === 'PvE' && <label className="difficulty"><span>BOT LEVEL</span><select value={difficulty} onChange={e => setDifficulty(e.target.value)} disabled={status !== 'playing'}><option>Easy</option><option>Medium</option></select></label>}
+        {mode === 'PvE' && <label className="difficulty"><span>BOT LEVEL</span><select value={difficulty} onChange={e => setDifficulty(e.target.value)} disabled={status !== 'playing'}><option>Easy</option><option>Medium</option><option>Hard</option></select></label>}
         {mode === 'online' && <div className="online-game-badge"><span className={connectionState === 'Connected' ? 'connected-dot' : 'disconnected-dot'} />{connectionState || 'Connecting'} <b>{onlineRoom?.code}</b><button onClick={async () => { try { await navigator.clipboard.writeText(onlineRoom.code); setOnlineMessage('Room code copied.'); } catch { setOnlineMessage(`Share room code ${onlineRoom.code} with your opponent.`); } }} aria-label="Copy room code">Copy</button></div>}
         <button className={`icon-button ${sound ? 'active' : ''}`} onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Mute sound' : 'Enable sound'}>{sound ? '♫' : '♪'}</button>
         {mode !== 'online' && <button className="restart-top" onClick={restart}><span>↻</span><span className="restart-label">New game</span></button>}
